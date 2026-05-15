@@ -14,6 +14,7 @@ import 'package:immich_mobile/infrastructure/entities/local_asset.entity.drift.d
 import 'package:immich_mobile/infrastructure/entities/memory.entity.dart';
 import 'package:immich_mobile/infrastructure/entities/memory_asset.entity.dart';
 import 'package:immich_mobile/infrastructure/entities/metadata.entity.dart';
+import 'package:immich_mobile/infrastructure/entities/offline_asset.entity.dart';
 import 'package:immich_mobile/infrastructure/entities/partner.entity.dart';
 import 'package:immich_mobile/infrastructure/entities/person.entity.dart';
 import 'package:immich_mobile/infrastructure/entities/remote_album.entity.dart';
@@ -56,6 +57,7 @@ import 'package:logging/logging.dart';
     TrashedLocalAssetEntity,
     AssetEditEntity,
     MetadataEntity,
+    OfflineAssetEntity,
   ],
   include: {'package:immich_mobile/infrastructure/entities/merged_asset.drift'},
 )
@@ -98,7 +100,7 @@ class Drift extends $Drift {
   }
 
   @override
-  int get schemaVersion => 26;
+  int get schemaVersion => 27;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -275,6 +277,11 @@ class Drift extends $Drift {
           },
           from25To26: (m, v26) async {
             await m.addColumn(v26.remoteAssetEntity, v26.remoteAssetEntity.uploadedAt);
+          },
+          from26To27: (m, v27) async {
+            await m.createTable(v27.offlineAssetEntity);
+            await m.createIndex(v27.idxOfflineAssetRemoteAssetId);
+            await m.createIndex(v27.idxOfflineAssetLastAccessed);
           },
         ),
       );
