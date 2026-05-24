@@ -1,11 +1,14 @@
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:async/async.dart';
 import 'package:flutter/widgets.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/asset/offline_asset.model.dart';
 import 'package:immich_mobile/infrastructure/loaders/image_request.dart';
 import 'package:immich_mobile/infrastructure/repositories/metadata.repository.dart';
 import 'package:immich_mobile/presentation/widgets/images/local_image_provider.dart';
+import 'package:immich_mobile/presentation/widgets/images/offline_image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/remote_image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/constants.dart';
 import 'package:logging/logging.dart';
@@ -146,42 +149,77 @@ mixin CancellableImageProviderMixin<T extends Object> on CancellableImageProvide
   }
 }
 
-ImageProvider getFullImageProvider(BaseAsset asset, {Size size = const Size(1080, 1920), bool edited = true}) {
-  // Create new provider and cache it
-  final ImageProvider provider;
+ImageProvider getFullImageProvider(
+  BaseAsset asset, {
+  Size size = const Size(1080, 1920),
+  bool edited = true,
+  OfflineAsset? offlineAsset,
+}) {
+  // Priority: Local > Offline Cache > Remote
+
+  // 1. Check if we should use local asset (device storage)
   if (_shouldUseLocalAsset(asset)) {
     final id = asset is LocalAsset ? asset.id : (asset as RemoteAsset).localId!;
-    provider = LocalFullImageProvider(id: id, size: size, assetType: asset.type, isAnimated: asset.isAnimatedImage);
-  } else {
-    final String assetId;
-    final String thumbhash;
-    if (asset is LocalAsset && asset.hasRemote) {
-      assetId = asset.remoteId!;
-      thumbhash = "";
-    } else if (asset is RemoteAsset) {
-      assetId = asset.id;
-      thumbhash = asset.thumbHash ?? "";
-    } else {
-      throw ArgumentError("Unsupported asset type: ${asset.runtimeType}");
-    }
-    provider = RemoteFullImageProvider(
-      assetId: assetId,
-      thumbhash: thumbhash,
-      assetType: asset.type,
-      isAnimated: asset.isAnimatedImage,
-      edited: edited,
-    );
+    return LocalFullImageProvider(id: id, size: size, assetType: asset.type, isAnimated: asset.isAnimatedImage);
   }
 
-  return provider;
+  // 2. Check if offline cached version exists and is valid
+  if (offlineAsset != null && offlineAsset.hasFullImage) {
+    final file = File(offlineAsset.fullImagePath!);
+    if (file.existsSync()) {
+      return OfflineFullImageProvider(
+        filePath: offlineAsset.fullImagePath!,
+        thumbnailPath: offlineAsset.thumbnailPath,
+        isAnimated: asset.isAnimatedImage,
+      );
+    }
+  }
+
+  // 3. Fall back to remote loading
+  final String assetId;
+  final String thumbhash;
+  if (asset is LocalAsset && asset.hasRemote) {
+    assetId = asset.remoteId!;
+    thumbhash = "";
+  } else if (asset is RemoteAsset) {
+    assetId = asset.id;
+    thumbhash = asset.thumbHash ?? "";
+  } else {
+    throw ArgumentError("Unsupported asset type: ${asset.runtimeType}");
+  }
+
+  return RemoteFullImageProvider(
+    assetId: assetId,
+    thumbhash: thumbhash,
+    assetType: asset.type,
+    isAnimated: asset.isAnimatedImage,
+    edited: edited,
+  );
 }
 
-ImageProvider? getThumbnailImageProvider(BaseAsset asset, {Size size = kThumbnailResolution, bool edited = true}) {
+ImageProvider? getThumbnailImageProvider(
+  BaseAsset asset, {
+  Size size = kThumbnailResolution,
+  bool edited = true,
+  OfflineAsset? offlineAsset,
+}) {
+  // Priority: Local > Offline Cache > Remote
+
+  // 1. Check if we should use local asset (device storage)
   if (_shouldUseLocalAsset(asset)) {
     final id = asset is LocalAsset ? asset.id : (asset as RemoteAsset).localId!;
     return LocalThumbProvider(id: id, size: size, assetType: asset.type);
   }
 
+  // 2. Check if offline cached thumbnail exists and is valid
+  if (offlineAsset != null && offlineAsset.hasThumbnail) {
+    final file = File(offlineAsset.thumbnailPath!);
+    if (file.existsSync()) {
+      return OfflineThumbProvider(filePath: offlineAsset.thumbnailPath!);
+    }
+  }
+
+  // 3. Fall back to remote loading
   final assetId = asset is RemoteAsset ? asset.id : (asset as LocalAsset).remoteId;
   final thumbhash = asset is RemoteAsset ? asset.thumbHash ?? "" : "";
   return assetId != null ? RemoteImageProvider.thumbnail(assetId: assetId, thumbhash: thumbhash, edited: edited) : null;

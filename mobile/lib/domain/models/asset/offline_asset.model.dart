@@ -1,7 +1,8 @@
-import 'package:immich_mobile/infrastructure/entities/offline_asset.entity.dart';
+import 'package:drift/drift.dart';
+import 'package:immich_mobile/infrastructure/entities/offline_asset.entity.drift.dart';
 
 /// Domain model representing an offline cached asset
-/// 
+///
 /// This model represents assets that have been downloaded and cached locally
 /// for offline access. It tracks the file paths of cached content (thumbnail,
 /// full image, video) and metadata about the cache (download time, file size,
@@ -136,9 +137,9 @@ extension OfflineAssetToEntity on OfflineAsset {
   OfflineAssetEntityCompanion toCompanion() {
     return OfflineAssetEntityCompanion.insert(
       remoteAssetId: remoteAssetId,
-      thumbnailPath: thumbnailPath,
-      fullImagePath: fullImagePath,
-      videoPath: videoPath,
+      thumbnailPath: thumbnailPath != null ? Value(thumbnailPath) : const Value.absent(),
+      fullImagePath: fullImagePath != null ? Value(fullImagePath) : const Value.absent(),
+      videoPath: videoPath != null ? Value(videoPath) : const Value.absent(),
       downloadedAt: downloadedAt,
       fileSize: fileSize,
       lastAccessedAt: lastAccessedAt,

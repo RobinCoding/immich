@@ -13485,6 +13485,7 @@ final class Schema26 extends i0.VersionedSchema {
     'idx_asset_edit_asset_id',
     'CREATE INDEX IF NOT EXISTS idx_asset_edit_asset_id ON asset_edit_entity (asset_id)',
   );
+}
 
 final class Schema27 extends i0.VersionedSchema {
   Schema27({required super.database}) : super(version: 27);
@@ -13711,12 +13712,12 @@ final class Schema27 extends i0.VersionedSchema {
     'idx_stack_primary_asset_id',
     'CREATE INDEX IF NOT EXISTS idx_stack_primary_asset_id ON stack_entity (primary_asset_id)',
   );
-  final i1.UniqueKey uQRemoteAssetsOwnerChecksum = i1.UniqueKey(
-    'u_q_remote_assets_owner_checksum',
+  final i1.Index uQRemoteAssetsOwnerChecksum = i1.Index(
+    'UQ_remote_assets_owner_checksum',
     'CREATE UNIQUE INDEX u_q_remote_assets_owner_checksum ON remote_asset_entity (owner_id, checksum)',
   );
-  final i1.UniqueKey uQRemoteAssetsOwnerLibraryChecksum = i1.UniqueKey(
-    'u_q_remote_assets_owner_library_checksum',
+  final i1.Index uQRemoteAssetsOwnerLibraryChecksum = i1.Index(
+    'UQ_remote_assets_owner_library_checksum',
     'CREATE UNIQUE INDEX u_q_remote_assets_owner_library_checksum ON remote_asset_entity (owner_id, library_id, checksum)',
   );
   final i1.Index idxRemoteAssetChecksum = i1.Index(
@@ -14122,7 +14123,8 @@ i1.GeneratedColumn<String> _column_213(String aliasedName) =>
       aliasedName,
       false,
       type: i1.DriftSqlType.string,
-      $customConstraints: 'NOT NULL REFERENCES remote_asset_entity(id)ON DELETE CASCADE',
+      $customConstraints:
+          'NOT NULL REFERENCES remote_asset_entity(id)ON DELETE CASCADE',
     );
 i1.GeneratedColumn<String> _column_214(String aliasedName) =>
     i1.GeneratedColumn<String>(
@@ -14172,7 +14174,6 @@ i1.GeneratedColumn<String> _column_219(String aliasedName) =>
       type: i1.DriftSqlType.string,
       $customConstraints: 'NOT NULL',
     );
-}
 
 class Shape50 extends i0.VersionedTable {
   Shape50({required super.source, required super.alias}) : super.aliased();

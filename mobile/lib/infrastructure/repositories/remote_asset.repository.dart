@@ -277,6 +277,20 @@ class RemoteAssetRepository extends DriftDatabaseRepository {
     return _db.managers.remoteAssetEntity.count();
   }
 
+  /// Get all remote assets (excluding trashed and archived)
+  Future<List<RemoteAsset>> getAll({String? userId}) {
+    final query = _db.remoteAssetEntity.select()
+      ..where(
+        (row) =>
+            row.deletedAt.isNull() &
+            row.visibility.equalsValue(AssetVisibility.timeline) &
+            (userId != null ? row.ownerId.equals(userId) : const Constant(true)),
+      )
+      ..orderBy([(row) => OrderingTerm.desc(row.createdAt)]);
+
+    return query.map((row) => row.toDto()).get();
+  }
+
   Future<List<AssetEdit>> getAssetEdits(String assetId) {
     final query = _db.assetEditEntity.select()
       ..where((row) => row.assetId.equals(assetId) & row.action.equals(AssetEditAction.other.index).not())

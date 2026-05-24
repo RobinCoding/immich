@@ -7,8 +7,10 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
 import 'package:immich_mobile/extensions/translate_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/infrastructure/repositories/offline_asset.repository.dart';
 import 'package:immich_mobile/providers/app_settings.provider.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
+import 'package:immich_mobile/providers/bulk_offline_download.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
@@ -18,12 +20,17 @@ import 'package:immich_mobile/providers/infrastructure/trash_sync.provider.dart'
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/sync_status.provider.dart';
 import 'package:immich_mobile/services/app_settings.service.dart';
+import 'package:immich_mobile/utils/bytes_units.dart';
 import 'package:immich_mobile/widgets/settings/beta_sync_settings/entity_count_tile.dart';
 import 'package:immich_mobile/widgets/settings/setting_group_title.dart';
 import 'package:immich_mobile/widgets/settings/setting_list_tile.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+
+final offlineAssetRepositoryProvider = Provider((ref) {
+  return OfflineAssetRepository(ref.watch(driftProvider));
+});
 
 class SyncStatusAndActions extends HookConsumerWidget {
   const SyncStatusAndActions({super.key});
@@ -189,6 +196,9 @@ class SyncStatusAndActions extends HookConsumerWidget {
             await resetSqliteDb(context);
           },
         ),
+        const Divider(height: 1),
+        const SizedBox(height: 16),
+        const _OfflineCacheSection(),
       ],
     );
   }
@@ -392,6 +402,203 @@ class _SyncStatsCounts extends ConsumerWidget {
                     error: (e, st) => Text('Error: $e'),
                   );
                 },
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _OfflineCacheSection extends ConsumerWidget {
+  const _OfflineCacheSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final offlineAssetRepo = ref.watch(offlineAssetRepositoryProvider);
+
+    Future<({int totalCount, int totalSize})> loadCacheStats() async {
+      return await offlineAssetRepo.getCacheStats();
+    }
+
+    Future<void> clearCache() async {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text("Clear Offline Cache".t(context: context)),
+          content: Text("This will delete all offline cached assets. Are you sure?".t(context: context)),
+          actions: [
+            TextButton(onPressed: () => context.pop(false), child: Text(context.t.cancel)),
+            TextButton(
+              onPressed: () => context.pop(true),
+              style: TextButton.styleFrom(foregroundColor: context.colorScheme.error),
+              child: Text(context.t.confirm),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) {
+        return;
+      }
+
+      try {
+        // Get all cached assets
+        final assets = await offlineAssetRepo.getAll();
+
+        // Delete files from storage
+        for (final asset in assets) {
+          if (asset.thumbnailPath != null) {
+            final file = File(asset.thumbnailPath!);
+            if (await file.exists()) {
+              await file.delete();
+            }
+          }
+          if (asset.fullImagePath != null) {
+            final file = File(asset.fullImagePath!);
+            if (await file.exists()) {
+              await file.delete();
+            }
+          }
+          if (asset.videoPath != null) {
+            final file = File(asset.videoPath!);
+            if (await file.exists()) {
+              await file.delete();
+            }
+          }
+        }
+
+        // Delete all database records
+        await offlineAssetRepo.deleteAll();
+
+        if (context.mounted) {
+          context.scaffoldMessenger.showSnackBar(
+            SnackBar(content: Text("Offline cache cleared successfully".t(context: context))),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          context.scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: Text("Failed to clear offline cache: $e".t(context: context)),
+              backgroundColor: context.colorScheme.error,
+            ),
+          );
+        }
+      }
+    }
+
+    final bulkDownloadState = ref.watch(bulkOfflineDownloadProvider);
+
+    return FutureBuilder<({int totalCount, int totalSize})>(
+      future: loadCacheStats(),
+      builder: (context, snapshot) {
+        final isLoading = snapshot.connectionState != ConnectionState.done;
+        final hasError = snapshot.hasError;
+        final stats = snapshot.data ?? (totalCount: 0, totalSize: 0);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SettingGroupTitle(title: "Offline Cache".t(context: context)),
+            if (hasError)
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  "Error loading cache statistics".t(context: context),
+                  style: TextStyle(color: context.colorScheme.error),
+                ),
+              )
+            else ...[
+              SettingListTile(
+                title: "Total Assets".t(context: context),
+                leading: const Icon(Icons.photo_library_outlined),
+                trailing: isLoading
+                    ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(
+                        stats.totalCount.toString(),
+                        style: context.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+              ),
+              SettingListTile(
+                title: "Total Size".t(context: context),
+                leading: const Icon(Icons.storage_outlined),
+                trailing: isLoading
+                    ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(
+                        formatHumanReadableBytes(stats.totalSize, 2),
+                        style: context.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+              ),
+              const Divider(height: 1),
+              // Auto-download toggle
+              SwitchListTile(
+                title: Text(
+                  "Auto-Download Remote Assets".t(context: context),
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                ),
+                subtitle: Text("Automatically download all remote assets for offline access".t(context: context)),
+                secondary: const Icon(Icons.cloud_download_outlined),
+                value: bulkDownloadState.isEnabled,
+                onChanged: (value) {
+                  ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
+                },
+              ),
+              // Show download progress when downloading
+              if (bulkDownloadState.isDownloading) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Downloading ${bulkDownloadState.downloadedAssets} of ${bulkDownloadState.totalAssets}",
+                            style: context.textTheme.bodyMedium,
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              ref.read(bulkOfflineDownloadProvider.notifier).cancelBulkDownload();
+                            },
+                            child: Text("Cancel".t(context: context)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(value: bulkDownloadState.progress),
+                      if (bulkDownloadState.failedAssets > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            "${bulkDownloadState.failedAssets} failed",
+                            style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+              // Show error message if any
+              if (bulkDownloadState.errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Text(
+                    bulkDownloadState.errorMessage!,
+                    style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
+                  ),
+                ),
+              const Divider(height: 1),
+              ListTile(
+                title: Text(
+                  "Clear Offline Cache".t(context: context),
+                  style: TextStyle(color: context.colorScheme.error, fontWeight: FontWeight.w500),
+                ),
+                leading: Icon(Icons.delete_outline, color: context.colorScheme.error),
+                enabled: !isLoading && stats.totalCount > 0,
+                onTap: clearCache,
               ),
             ],
           ],

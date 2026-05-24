@@ -8,6 +8,7 @@ import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/presentation/widgets/images/thumbnail.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/constants.dart';
 import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
+import 'package:immich_mobile/providers/asset_viewer/offline_download_state.provider.dart';
 import 'package:immich_mobile/providers/backup/asset_upload_progress.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/metadata.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
@@ -151,31 +152,57 @@ class _ThumbnailTileState extends ConsumerState<ThumbnailTile> {
                     ),
                   ),
                 if (storageIndicator && asset != null)
-                  AnimatedOpacity(
-                    opacity: _hideIndicators ? 0.0 : 1.0,
-                    duration: Durations.short4,
-                    child: switch (asset.storage) {
-                      AssetState.local => const Align(
-                        alignment: Alignment.bottomRight,
-                        child: Padding(
-                          padding: EdgeInsets.only(right: 10.0, bottom: 6.0),
-                          child: _TileOverlayIcon(Icons.cloud_off_outlined),
-                        ),
-                      ),
-                      AssetState.remote => const Align(
-                        alignment: Alignment.bottomRight,
-                        child: Padding(
-                          padding: EdgeInsets.only(right: 10.0, bottom: 6.0),
-                          child: _TileOverlayIcon(Icons.cloud_outlined),
-                        ),
-                      ),
-                      AssetState.merged => const Align(
-                        alignment: Alignment.bottomRight,
-                        child: Padding(
-                          padding: EdgeInsets.only(right: 10.0, bottom: 6.0),
-                          child: _TileOverlayIcon(Icons.cloud_done_outlined),
-                        ),
-                      ),
+                  Builder(
+                    builder: (context) {
+                      // For remote assets, check offline cache status
+                      if (asset.storage == AssetState.remote && asset.remoteId != null) {
+                        final isCached = ref.watch(
+                          offlineDownloadStateProvider(asset.remoteId!).select((s) => s.isCached),
+                        );
+
+                        if (isCached) {
+                          return AnimatedOpacity(
+                            opacity: _hideIndicators ? 0.0 : 1.0,
+                            duration: Durations.short4,
+                            child: const Align(
+                              alignment: Alignment.bottomRight,
+                              child: Padding(
+                                padding: EdgeInsets.only(right: 10.0, bottom: 6.0),
+                                child: _TileOverlayIcon(Icons.offline_pin),
+                              ),
+                            ),
+                          );
+                        }
+                      }
+
+                      // Existing cloud icon logic for non-cached assets
+                      return AnimatedOpacity(
+                        opacity: _hideIndicators ? 0.0 : 1.0,
+                        duration: Durations.short4,
+                        child: switch (asset.storage) {
+                          AssetState.local => const Align(
+                            alignment: Alignment.bottomRight,
+                            child: Padding(
+                              padding: EdgeInsets.only(right: 10.0, bottom: 6.0),
+                              child: _TileOverlayIcon(Icons.cloud_off_outlined),
+                            ),
+                          ),
+                          AssetState.remote => const Align(
+                            alignment: Alignment.bottomRight,
+                            child: Padding(
+                              padding: EdgeInsets.only(right: 10.0, bottom: 6.0),
+                              child: _TileOverlayIcon(Icons.cloud_outlined),
+                            ),
+                          ),
+                          AssetState.merged => const Align(
+                            alignment: Alignment.bottomRight,
+                            child: Padding(
+                              padding: EdgeInsets.only(right: 10.0, bottom: 6.0),
+                              child: _TileOverlayIcon(Icons.cloud_done_outlined),
+                            ),
+                          ),
+                        },
+                      );
                     },
                   ),
 

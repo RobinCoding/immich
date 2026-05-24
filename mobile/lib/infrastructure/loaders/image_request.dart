@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:ffi/ffi.dart';
@@ -9,6 +10,7 @@ import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
 
 part 'local_image_request.dart';
+part 'offline_image_request.dart';
 part 'remote_image_request.dart';
 part 'thumbhash_image_request.dart';
 
