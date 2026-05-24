@@ -151,35 +151,22 @@ class _ThumbnailTileState extends ConsumerState<ThumbnailTile> {
                       ),
                     ),
                   ),
+
                 if (storageIndicator && asset != null)
                   Builder(
                     builder: (context) {
-                      // For remote assets, check offline cache status
-                      if (asset.storage == AssetState.remote && asset.remoteId != null) {
-                        final isCached = ref.watch(
-                          offlineDownloadStateProvider(asset.remoteId!).select((s) => s.isCached),
-                        );
+                      // Check if remote asset is cached for offline viewing
+                      final isCached =
+                          asset.storage == AssetState.remote &&
+                          asset.remoteId != null &&
+                          ref.watch(offlineDownloadStateProvider(asset.remoteId!).select((s) => s.isCached));
 
-                        if (isCached) {
-                          return AnimatedOpacity(
-                            opacity: _hideIndicators ? 0.0 : 1.0,
-                            duration: Durations.short4,
-                            child: const Align(
-                              alignment: Alignment.bottomRight,
-                              child: Padding(
-                                padding: EdgeInsets.only(right: 10.0, bottom: 6.0),
-                                child: _TileOverlayIcon(Icons.offline_pin),
-                              ),
-                            ),
-                          );
-                        }
-                      }
-
-                      // Existing cloud icon logic for non-cached assets
+                      // Display appropriate cloud icon based on asset storage state
                       return AnimatedOpacity(
                         opacity: _hideIndicators ? 0.0 : 1.0,
                         duration: Durations.short4,
                         child: switch (asset.storage) {
+                          // Local-only asset (not uploaded to server)
                           AssetState.local => const Align(
                             alignment: Alignment.bottomRight,
                             child: Padding(
@@ -187,14 +174,16 @@ class _ThumbnailTileState extends ConsumerState<ThumbnailTile> {
                               child: _TileOverlayIcon(Icons.cloud_off_outlined),
                             ),
                           ),
-                          AssetState.remote => const Align(
+                          // Remote-only asset (not cached locally)
+                          AssetState.remote when !isCached => const Align(
                             alignment: Alignment.bottomRight,
                             child: Padding(
                               padding: EdgeInsets.only(right: 10.0, bottom: 6.0),
                               child: _TileOverlayIcon(Icons.cloud_outlined),
                             ),
                           ),
-                          AssetState.merged => const Align(
+                          // Remote asset cached for offline or merged asset (exists both locally and on server)
+                          AssetState.remote || AssetState.merged => const Align(
                             alignment: Alignment.bottomRight,
                             child: Padding(
                               padding: EdgeInsets.only(right: 10.0, bottom: 6.0),

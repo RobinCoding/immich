@@ -16,18 +16,22 @@ import 'package:logging/logging.dart';
 class BulkDownloadState {
   final bool isEnabled;
   final bool isDownloading;
+  final bool isMonitoring;
   final int totalAssets;
   final int downloadedAssets;
   final int failedAssets;
   final String? errorMessage;
+  final DateTime? lastCheckTime;
 
   const BulkDownloadState({
     this.isEnabled = false,
     this.isDownloading = false,
+    this.isMonitoring = false,
     this.totalAssets = 0,
     this.downloadedAssets = 0,
     this.failedAssets = 0,
     this.errorMessage,
+    this.lastCheckTime,
   });
 
   double get progress {
@@ -42,18 +46,22 @@ class BulkDownloadState {
   BulkDownloadState copyWith({
     bool? isEnabled,
     bool? isDownloading,
+    bool? isMonitoring,
     int? totalAssets,
     int? downloadedAssets,
     int? failedAssets,
     String? errorMessage,
+    DateTime? lastCheckTime,
   }) {
     return BulkDownloadState(
       isEnabled: isEnabled ?? this.isEnabled,
       isDownloading: isDownloading ?? this.isDownloading,
+      isMonitoring: isMonitoring ?? this.isMonitoring,
       totalAssets: totalAssets ?? this.totalAssets,
       downloadedAssets: downloadedAssets ?? this.downloadedAssets,
       failedAssets: failedAssets ?? this.failedAssets,
       errorMessage: errorMessage ?? this.errorMessage,
+      lastCheckTime: lastCheckTime ?? this.lastCheckTime,
     );
   }
 }
@@ -83,7 +91,12 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   final Logger _log = Logger('BulkOfflineDownloadNotifier');
 
   StreamSubscription<DownloadProgress>? _progressSubscription;
+  Timer? _monitoringTimer;
   bool _isCancelled = false;
+  bool _isCheckingForNewAssets = false;
+
+  // Check for new assets every 5 seconds
+  static const Duration _monitoringInterval = Duration(seconds: 5);
 
   BulkOfflineDownloadNotifier({
     required OfflineDownloadService downloadService,
@@ -109,6 +122,11 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
 
       // Listen to download progress
       _progressSubscription = _downloadService.progressStream.listen(_onProgressUpdate);
+
+      // Start monitoring if enabled
+      if (isEnabled) {
+        _startMonitoring();
+      }
     } catch (error) {
       _log.warning('Error initializing bulk download state: $error');
     }
@@ -139,6 +157,140 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     }
   }
 
+  /// Start monitoring for new remote assets
+  void _startMonitoring() {
+    if (_monitoringTimer != null) {
+      _log.info('Monitoring already active');
+      return;
+    }
+
+    _log.info('Starting background monitoring for new remote assets');
+
+    if (mounted) {
+      state = state.copyWith(isMonitoring: true);
+    }
+
+    // Check immediately on start
+    _checkForNewAssets();
+
+    // Then check periodically
+    _monitoringTimer = Timer.periodic(_monitoringInterval, (_) {
+      _checkForNewAssets();
+    });
+  }
+
+  /// Stop monitoring for new remote assets
+  void _stopMonitoring() {
+    if (_monitoringTimer == null) {
+      return;
+    }
+
+    _log.info('Stopping background monitoring');
+    _monitoringTimer?.cancel();
+    _monitoringTimer = null;
+
+    if (mounted) {
+      state = state.copyWith(isMonitoring: false);
+    }
+  }
+
+  /// Check for new remote assets and download them
+  Future<void> _checkForNewAssets() async {
+    // Prevent concurrent checks
+    if (_isCheckingForNewAssets) {
+      _log.fine('Already checking for new assets, skipping');
+      return;
+    }
+
+    // Don't check if already downloading
+    if (state.isDownloading) {
+      _log.fine('Download in progress, skipping check');
+      return;
+    }
+
+    // Don't check if monitoring is disabled
+    if (!state.isEnabled) {
+      _log.fine('Auto-download disabled, skipping check');
+      return;
+    }
+
+    _isCheckingForNewAssets = true;
+
+    try {
+      _log.fine('Checking for new remote assets to download');
+
+      // Get assets that need to be downloaded
+      final assetsToDownload = await _getRemoteAssetsToDownload();
+
+      if (mounted) {
+        state = state.copyWith(lastCheckTime: DateTime.now());
+      }
+
+      if (assetsToDownload.isEmpty) {
+        _log.fine('No new assets to download');
+        return;
+      }
+
+      _log.info('Found ${assetsToDownload.length} new remote assets to download');
+
+      // Start downloading the new assets
+      await _downloadNewAssets(assetsToDownload);
+    } catch (error) {
+      _log.warning('Error checking for new assets: $error');
+    } finally {
+      _isCheckingForNewAssets = false;
+    }
+  }
+
+  /// Download newly discovered assets
+  Future<void> _downloadNewAssets(List<RemoteAsset> assets) async {
+    if (assets.isEmpty) {
+      return;
+    }
+
+    try {
+      _isCancelled = false;
+
+      if (mounted) {
+        state = state.copyWith(
+          isDownloading: true,
+          totalAssets: assets.length,
+          downloadedAssets: 0,
+          failedAssets: 0,
+          errorMessage: null,
+        );
+      }
+
+      _log.info('Starting download of ${assets.length} new assets');
+
+      // Download assets one by one
+      for (final asset in assets) {
+        if (_isCancelled || !state.isEnabled) {
+          _log.info('Download cancelled or disabled');
+          break;
+        }
+
+        try {
+          await _downloadService.downloadAsset(asset, options: const DownloadOptions.thumbnailAndImage());
+        } catch (error) {
+          _log.warning('Error downloading asset ${asset.id}: $error');
+          // Continue with next asset even if one fails
+        }
+      }
+
+      if (mounted) {
+        state = state.copyWith(isDownloading: false);
+      }
+
+      _log.info('New assets download completed: ${state.downloadedAssets} succeeded, ${state.failedAssets} failed');
+    } catch (error) {
+      _log.severe('Error during new assets download: $error');
+      if (mounted) {
+        state = state.copyWith(isDownloading: false, errorMessage: error.toString());
+      }
+    }
+  }
+
   /// Toggle auto-download setting
   Future<void> toggleAutoDownload(bool enabled) async {
     try {
@@ -149,9 +301,13 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       }
 
       if (enabled) {
-        // Start downloading when enabled
+        // Start monitoring for new assets
+        _startMonitoring();
+        // Start downloading existing assets
         await startBulkDownload();
       } else {
+        // Stop monitoring
+        _stopMonitoring();
         // Cancel any ongoing downloads when disabled
         await cancelBulkDownload();
       }
@@ -293,6 +449,7 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
 
   @override
   void dispose() {
+    _stopMonitoring();
     _progressSubscription?.cancel();
     super.dispose();
   }

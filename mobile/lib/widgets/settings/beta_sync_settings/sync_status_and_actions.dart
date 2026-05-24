@@ -32,6 +32,52 @@ final offlineAssetRepositoryProvider = Provider((ref) {
   return OfflineAssetRepository(ref.watch(driftProvider));
 });
 
+// Provider for cache stats that can be refreshed
+final cacheStatsProvider = FutureProvider.autoDispose<({int totalCount, int totalSize})>((ref) async {
+  final offlineAssetRepo = ref.watch(offlineAssetRepositoryProvider);
+  return await offlineAssetRepo.getCacheStats();
+});
+
+// Provider for sync stats counts
+final syncStatsCountsProvider =
+    FutureProvider.autoDispose<
+      ({
+        int localAssetCount,
+        int remoteAssetCount,
+        int localAlbumCount,
+        int remoteAlbumCount,
+        int memoryCount,
+        int localHashedCount,
+        int cachedRemoteCount,
+      })
+    >((ref) async {
+      final assetService = ref.watch(assetServiceProvider);
+      final localAlbumService = ref.watch(localAlbumServiceProvider);
+      final remoteAlbumService = ref.watch(remoteAlbumServiceProvider);
+      final memoryService = ref.watch(driftMemoryServiceProvider);
+      final offlineAssetRepo = ref.watch(offlineAssetRepositoryProvider);
+
+      final results = await Future.wait([
+        assetService.getAssetCounts(),
+        localAlbumService.getCount(),
+        remoteAlbumService.getCount(),
+        memoryService.getCount(),
+        assetService.getLocalHashedCount(),
+        offlineAssetRepo.getCount(),
+      ]);
+
+      final assetCounts = results[0] as (int, int);
+      return (
+        localAssetCount: assetCounts.$1,
+        remoteAssetCount: assetCounts.$2,
+        localAlbumCount: results[1] as int,
+        remoteAlbumCount: results[2] as int,
+        memoryCount: results[3] as int,
+        localHashedCount: results[4] as int,
+        cachedRemoteCount: results[5] as int,
+      );
+    });
+
 class SyncStatusAndActions extends HookConsumerWidget {
   const SyncStatusAndActions({super.key});
 
@@ -151,7 +197,7 @@ class SyncStatusAndActions extends HookConsumerWidget {
         ),
         if (CurrentPlatform.isIOS && serverVersion.isAtLeast(major: 2, minor: 5))
           SettingListTile(
-            title: "Sync Cloud Ids".t(context: context),
+            title: "sync_cloud_ids".t(context: context),
             leading: const Icon(Icons.cloud_circle_rounded),
             subtitle: "tap_to_run_job".t(context: context),
             trailing: _SyncStatusIcon(status: ref.watch(syncStatusProvider).cloudIdSyncStatus),
@@ -225,188 +271,164 @@ class _SyncStatsCounts extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final assetService = ref.watch(assetServiceProvider);
-    final localAlbumService = ref.watch(localAlbumServiceProvider);
-    final remoteAlbumService = ref.watch(remoteAlbumServiceProvider);
-    final memoryService = ref.watch(driftMemoryServiceProvider);
     final appSettingsService = ref.watch(appSettingsServiceProvider);
+    final syncStatsAsync = ref.watch(syncStatsCountsProvider);
 
-    Future<List<dynamic>> loadCounts() async {
-      final assetCounts = assetService.getAssetCounts();
-      final localAlbumCounts = localAlbumService.getCount();
-      final remoteAlbumCounts = remoteAlbumService.getCount();
-      final memoryCount = memoryService.getCount();
-      final getLocalHashedCount = assetService.getLocalHashedCount();
-
-      return await Future.wait([assetCounts, localAlbumCounts, remoteAlbumCounts, memoryCount, getLocalHashedCount]);
-    }
-
-    return FutureBuilder(
-      future: loadCounts(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: SizedBox(height: 48, width: 48, child: CircularProgressIndicator()));
-        }
-
-        if (snapshot.hasError) {
-          return ListView(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Center(
-                  child: Text(
-                    "Error occur, reset the local database by tapping the button below",
-                    style: context.textTheme.bodyLarge,
+    return syncStatsAsync.when(
+      data: (stats) => Column(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SettingGroupTitle(title: "assets".t(context: context)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            // 1. Wrap in IntrinsicHeight
+            child: IntrinsicHeight(
+              child: Flex(
+                direction: Axis.horizontal,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                // 2. Stretch children vertically to fill the IntrinsicHeight
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: 8.0,
+                children: [
+                  Expanded(
+                    child: EntityCountTile(
+                      label: "local".t(context: context),
+                      count: stats.localAssetCount,
+                      icon: Icons.smartphone,
+                    ),
                   ),
-                ),
-              ),
-            ],
-          );
-        }
-
-        final assetCounts = snapshot.data![0]! as (int, int);
-        final localAssetCount = assetCounts.$1;
-        final remoteAssetCount = assetCounts.$2;
-
-        final localAlbumCount = snapshot.data![1]! as int;
-        final remoteAlbumCount = snapshot.data![2]! as int;
-        final memoryCount = snapshot.data![3]! as int;
-        final localHashedCount = snapshot.data![4]! as int;
-
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SettingGroupTitle(title: "assets".t(context: context)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              // 1. Wrap in IntrinsicHeight
-              child: IntrinsicHeight(
-                child: Flex(
-                  direction: Axis.horizontal,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  // 2. Stretch children vertically to fill the IntrinsicHeight
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  spacing: 8.0,
-                  children: [
-                    Expanded(
-                      child: EntityCountTile(
-                        label: "local".t(context: context),
-                        count: localAssetCount,
-                        icon: Icons.smartphone,
-                      ),
+                  Expanded(
+                    child: EntityCountTile(
+                      label: "remote".t(context: context),
+                      count: stats.remoteAssetCount,
+                      icon: Icons.cloud,
                     ),
-                    Expanded(
-                      child: EntityCountTile(
-                        label: "remote".t(context: context),
-                        count: remoteAssetCount,
-                        icon: Icons.cloud,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            SettingGroupTitle(title: "albums".t(context: context)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: IntrinsicHeight(
-                child: Flex(
-                  direction: Axis.horizontal,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.stretch, // Added
-                  spacing: 8.0,
-                  children: [
-                    Expanded(
-                      child: EntityCountTile(
-                        label: "local".t(context: context),
-                        count: localAlbumCount,
-                        icon: Icons.smartphone,
-                      ),
+          ),
+          SettingGroupTitle(title: "albums".t(context: context)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: IntrinsicHeight(
+              child: Flex(
+                direction: Axis.horizontal,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.stretch, // Added
+                spacing: 8.0,
+                children: [
+                  Expanded(
+                    child: EntityCountTile(
+                      label: "local".t(context: context),
+                      count: stats.localAlbumCount,
+                      icon: Icons.smartphone,
                     ),
-                    Expanded(
-                      child: EntityCountTile(
-                        label: "remote".t(context: context),
-                        count: remoteAlbumCount,
-                        icon: Icons.cloud,
-                      ),
+                  ),
+                  Expanded(
+                    child: EntityCountTile(
+                      label: "remote".t(context: context),
+                      count: stats.remoteAlbumCount,
+                      icon: Icons.cloud,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            SettingGroupTitle(title: "other".t(context: context)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: IntrinsicHeight(
-                child: Flex(
-                  direction: Axis.horizontal,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.stretch, // Added
-                  spacing: 8.0,
-                  children: [
-                    Expanded(
-                      child: EntityCountTile(
-                        label: "memories".t(context: context),
-                        count: memoryCount,
-                        icon: Icons.calendar_today,
-                      ),
-                    ),
-                    Expanded(
-                      child: EntityCountTile(
-                        label: "hashed_assets".t(context: context),
-                        count: localHashedCount,
-                        icon: Icons.tag,
-                      ),
-                    ),
-                  ],
-                ),
+          ),
+          SettingGroupTitle(title: "saved_remotes".t(context: context)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: IntrinsicHeight(
+              child: EntityCountTile(
+                label: "offline_cached".t(context: context),
+                count: stats.cachedRemoteCount,
+                icon: Icons.cloud_done_outlined,
               ),
             ),
-            // To be removed once the experimental feature is stable
-            if (CurrentPlatform.isAndroid &&
-                appSettingsService.getSetting<bool>(AppSettingsEnum.manageLocalMediaAndroid)) ...[
-              SettingGroupTitle(title: "trash".t(context: context)),
-              Consumer(
-                builder: (context, ref, _) {
-                  final counts = ref.watch(trashedAssetsCountProvider);
-                  return counts.when(
-                    data: (c) => Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                      child: IntrinsicHeight(
-                        child: Flex(
-                          direction: Axis.horizontal,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment: CrossAxisAlignment.stretch, // Added
-                          spacing: 8.0,
-                          children: [
-                            Expanded(
-                              child: EntityCountTile(
-                                label: "local".t(context: context),
-                                count: c.total,
-                                icon: Icons.delete_outline,
-                              ),
+          ),
+          SettingGroupTitle(title: "other".t(context: context)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: IntrinsicHeight(
+              child: Flex(
+                direction: Axis.horizontal,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.stretch, // Added
+                spacing: 8.0,
+                children: [
+                  Expanded(
+                    child: EntityCountTile(
+                      label: "memories".t(context: context),
+                      count: stats.memoryCount,
+                      icon: Icons.calendar_today,
+                    ),
+                  ),
+                  Expanded(
+                    child: EntityCountTile(
+                      label: "hashed_assets".t(context: context),
+                      count: stats.localHashedCount,
+                      icon: Icons.tag,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // To be removed once the experimental feature is stable
+          if (CurrentPlatform.isAndroid &&
+              appSettingsService.getSetting<bool>(AppSettingsEnum.manageLocalMediaAndroid)) ...[
+            SettingGroupTitle(title: "trash".t(context: context)),
+            Consumer(
+              builder: (context, ref, _) {
+                final counts = ref.watch(trashedAssetsCountProvider);
+                return counts.when(
+                  data: (c) => Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: IntrinsicHeight(
+                      child: Flex(
+                        direction: Axis.horizontal,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.stretch, // Added
+                        spacing: 8.0,
+                        children: [
+                          Expanded(
+                            child: EntityCountTile(
+                              label: "local".t(context: context),
+                              count: c.total,
+                              icon: Icons.delete_outline,
                             ),
-                            Expanded(
-                              child: EntityCountTile(
-                                label: "hashed_assets".t(context: context),
-                                count: c.hashed,
-                                icon: Icons.tag,
-                              ),
+                          ),
+                          Expanded(
+                            child: EntityCountTile(
+                              label: "hashed_assets".t(context: context),
+                              count: c.hashed,
+                              icon: Icons.tag,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
-                    loading: () => const CircularProgressIndicator(),
-                    error: (e, st) => Text('Error: $e'),
-                  );
-                },
-              ),
-            ],
+                  ),
+                  loading: () => const CircularProgressIndicator(),
+                  error: (e, st) => Text('Error: $e'),
+                );
+              },
+            ),
           ],
-        );
-      },
+        ],
+      ),
+      loading: () => const Center(child: SizedBox(height: 48, width: 48, child: CircularProgressIndicator())),
+      error: (error, stackTrace) => Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Center(
+          child: Text(
+            "Error occur, reset the local database by tapping the button below",
+            style: context.textTheme.bodyLarge,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -416,18 +438,14 @@ class _OfflineCacheSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final offlineAssetRepo = ref.watch(offlineAssetRepositoryProvider);
-
-    Future<({int totalCount, int totalSize})> loadCacheStats() async {
-      return await offlineAssetRepo.getCacheStats();
-    }
+    final cacheStatsAsync = ref.watch(cacheStatsProvider);
 
     Future<void> clearCache() async {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text("Clear Offline Cache".t(context: context)),
-          content: Text("This will delete all offline cached assets. Are you sure?".t(context: context)),
+          title: Text("offline_cache_clear_offline_cache".t(context: context)),
+          content: Text("offline_clear_cache_confirm_message".t(context: context)),
           actions: [
             TextButton(onPressed: () => context.pop(false), child: Text(context.t.cancel)),
             TextButton(
@@ -444,6 +462,8 @@ class _OfflineCacheSection extends ConsumerWidget {
       }
 
       try {
+        final offlineAssetRepo = ref.read(offlineAssetRepositoryProvider);
+
         // Get all cached assets
         final assets = await offlineAssetRepo.getAll();
 
@@ -472,16 +492,19 @@ class _OfflineCacheSection extends ConsumerWidget {
         // Delete all database records
         await offlineAssetRepo.deleteAll();
 
+        // Invalidate the cache stats provider to refresh the UI
+        ref.invalidate(cacheStatsProvider);
+
         if (context.mounted) {
           context.scaffoldMessenger.showSnackBar(
-            SnackBar(content: Text("Offline cache cleared successfully".t(context: context))),
+            SnackBar(content: Text("offline_cache_cleared_success".t(context: context))),
           );
         }
       } catch (e) {
         if (context.mounted) {
           context.scaffoldMessenger.showSnackBar(
             SnackBar(
-              content: Text("Failed to clear offline cache: $e".t(context: context)),
+              content: Text("offline_failed_to_clear_cache".t(context: context, args: {'error': e.toString()})),
               backgroundColor: context.colorScheme.error,
             ),
           );
@@ -491,119 +514,255 @@ class _OfflineCacheSection extends ConsumerWidget {
 
     final bulkDownloadState = ref.watch(bulkOfflineDownloadProvider);
 
-    return FutureBuilder<({int totalCount, int totalSize})>(
-      future: loadCacheStats(),
-      builder: (context, snapshot) {
-        final isLoading = snapshot.connectionState != ConnectionState.done;
-        final hasError = snapshot.hasError;
-        final stats = snapshot.data ?? (totalCount: 0, totalSize: 0);
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SettingGroupTitle(title: "Offline Cache".t(context: context)),
-            if (hasError)
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Text(
-                  "Error loading cache statistics".t(context: context),
-                  style: TextStyle(color: context.colorScheme.error),
-                ),
-              )
-            else ...[
-              SettingListTile(
-                title: "Total Assets".t(context: context),
-                leading: const Icon(Icons.photo_library_outlined),
-                trailing: isLoading
-                    ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text(
-                        stats.totalCount.toString(),
-                        style: context.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-              ),
-              SettingListTile(
-                title: "Total Size".t(context: context),
-                leading: const Icon(Icons.storage_outlined),
-                trailing: isLoading
-                    ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text(
-                        formatHumanReadableBytes(stats.totalSize, 2),
-                        style: context.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-              ),
-              const Divider(height: 1),
-              // Auto-download toggle
-              SwitchListTile(
-                title: Text(
-                  "Auto-Download Remote Assets".t(context: context),
-                  style: const TextStyle(fontWeight: FontWeight.w500),
-                ),
-                subtitle: Text("Automatically download all remote assets for offline access".t(context: context)),
-                secondary: const Icon(Icons.cloud_download_outlined),
-                value: bulkDownloadState.isEnabled,
-                onChanged: (value) {
-                  ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
-                },
-              ),
-              // Show download progress when downloading
-              if (bulkDownloadState.isDownloading) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    return cacheStatsAsync.when(
+      data: (stats) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SettingGroupTitle(title: "offline_cache_settings_title".t(context: context)),
+          SettingListTile(
+            title: "offline_total_assets".t(context: context),
+            leading: const Icon(Icons.photo_library_outlined),
+            trailing: Text(
+              stats.totalCount.toString(),
+              style: context.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          SettingListTile(
+            title: "offline_total_size".t(context: context),
+            leading: const Icon(Icons.storage_outlined),
+            trailing: Text(
+              formatHumanReadableBytes(stats.totalSize, 2),
+              style: context.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          const Divider(height: 1),
+          // Auto-download toggle
+          SwitchListTile(
+            title: Text(
+              "offline_auto_download_remote_assets".t(context: context),
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            subtitle: Text("offline_auto_download_remote_assets_subtitle".t(context: context)),
+            secondary: const Icon(Icons.cloud_download_outlined),
+            value: bulkDownloadState.isEnabled,
+            onChanged: (value) {
+              ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
+            },
+          ),
+          // Show download progress when downloading
+          if (bulkDownloadState.isDownloading) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            "Downloading ${bulkDownloadState.downloadedAssets} of ${bulkDownloadState.totalAssets}",
-                            style: context.textTheme.bodyMedium,
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              ref.read(bulkOfflineDownloadProvider.notifier).cancelBulkDownload();
-                            },
-                            child: Text("Cancel".t(context: context)),
-                          ),
-                        ],
+                      Text(
+                        "Downloading ${bulkDownloadState.downloadedAssets} of ${bulkDownloadState.totalAssets}",
+                        style: context.textTheme.bodyMedium,
                       ),
-                      const SizedBox(height: 8),
-                      LinearProgressIndicator(value: bulkDownloadState.progress),
-                      if (bulkDownloadState.failedAssets > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8.0),
-                          child: Text(
-                            "${bulkDownloadState.failedAssets} failed",
-                            style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
-                          ),
-                        ),
+                      TextButton(
+                        onPressed: () {
+                          ref.read(bulkOfflineDownloadProvider.notifier).cancelBulkDownload();
+                        },
+                        child: Text("offline_cancel".t(context: context)),
+                      ),
                     ],
                   ),
-                ),
-              ],
-              // Show error message if any
-              if (bulkDownloadState.errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Text(
-                    bulkDownloadState.errorMessage!,
-                    style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
-                  ),
-                ),
-              const Divider(height: 1),
-              ListTile(
-                title: Text(
-                  "Clear Offline Cache".t(context: context),
-                  style: TextStyle(color: context.colorScheme.error, fontWeight: FontWeight.w500),
-                ),
-                leading: Icon(Icons.delete_outline, color: context.colorScheme.error),
-                enabled: !isLoading && stats.totalCount > 0,
-                onTap: clearCache,
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: bulkDownloadState.progress),
+                  if (bulkDownloadState.failedAssets > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        "${bulkDownloadState.failedAssets} failed",
+                        style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
+                      ),
+                    ),
+                ],
               ),
-            ],
+            ),
           ],
-        );
-      },
+          // Show error message if any
+          if (bulkDownloadState.errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Text(
+                bulkDownloadState.errorMessage!,
+                style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
+              ),
+            ),
+          const Divider(height: 1),
+          ListTile(
+            title: Text(
+              "offline_cache_clear_offline_cache".t(context: context),
+              style: TextStyle(color: context.colorScheme.error, fontWeight: FontWeight.w500),
+            ),
+            leading: Icon(Icons.delete_outline, color: context.colorScheme.error),
+            enabled: stats.totalCount > 0,
+            onTap: clearCache,
+          ),
+        ],
+      ),
+      loading: () => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SettingGroupTitle(title: "offline_cache_settings_title".t(context: context)),
+          SettingListTile(
+            title: "offline_total_assets".t(context: context),
+            leading: const Icon(Icons.photo_library_outlined),
+            trailing: const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+          ),
+          SettingListTile(
+            title: "offline_total_size".t(context: context),
+            leading: const Icon(Icons.storage_outlined),
+            trailing: const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+          ),
+          const Divider(height: 1),
+          // Auto-download toggle
+          SwitchListTile(
+            title: Text(
+              "offline_auto_download_remote_assets".t(context: context),
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            subtitle: Text("offline_auto_download_remote_assets_subtitle".t(context: context)),
+            secondary: const Icon(Icons.cloud_download_outlined),
+            value: bulkDownloadState.isEnabled,
+            onChanged: (value) {
+              ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
+            },
+          ),
+          // Show download progress when downloading
+          if (bulkDownloadState.isDownloading) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "Downloading ${bulkDownloadState.downloadedAssets} of ${bulkDownloadState.totalAssets}",
+                        style: context.textTheme.bodyMedium,
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          ref.read(bulkOfflineDownloadProvider.notifier).cancelBulkDownload();
+                        },
+                        child: Text("offline_cancel".t(context: context)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: bulkDownloadState.progress),
+                  if (bulkDownloadState.failedAssets > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        "${bulkDownloadState.failedAssets} failed",
+                        style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+          // Show error message if any
+          if (bulkDownloadState.errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Text(
+                bulkDownloadState.errorMessage!,
+                style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
+              ),
+            ),
+          const Divider(height: 1),
+          ListTile(
+            title: Text(
+              "offline_cache_clear_offline_cache".t(context: context),
+              style: TextStyle(color: context.colorScheme.error, fontWeight: FontWeight.w500),
+            ),
+            leading: Icon(Icons.delete_outline, color: context.colorScheme.error),
+            enabled: false,
+            onTap: clearCache,
+          ),
+        ],
+      ),
+      error: (error, stackTrace) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SettingGroupTitle(title: "Offline Cache".t(context: context)),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              "Error loading cache statistics".t(context: context),
+              style: TextStyle(color: context.colorScheme.error),
+            ),
+          ),
+          const Divider(height: 1),
+          // Auto-download toggle
+          SwitchListTile(
+            title: Text(
+              "offline_auto_download_remote_assets".t(context: context),
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            subtitle: Text("offline_auto_download_remote_assets_subtitle".t(context: context)),
+            secondary: const Icon(Icons.cloud_download_outlined),
+            value: bulkDownloadState.isEnabled,
+            onChanged: (value) {
+              ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
+            },
+          ),
+          // Show download progress when downloading
+          if (bulkDownloadState.isDownloading) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "Downloading ${bulkDownloadState.downloadedAssets} of ${bulkDownloadState.totalAssets}",
+                        style: context.textTheme.bodyMedium,
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          ref.read(bulkOfflineDownloadProvider.notifier).cancelBulkDownload();
+                        },
+                        child: Text("offline_cancel".t(context: context)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: bulkDownloadState.progress),
+                  if (bulkDownloadState.failedAssets > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        "${bulkDownloadState.failedAssets} failed",
+                        style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+          // Show error message if any
+          if (bulkDownloadState.errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Text(
+                bulkDownloadState.errorMessage!,
+                style: context.textTheme.bodySmall?.copyWith(color: context.colorScheme.error),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
