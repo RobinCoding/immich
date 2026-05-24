@@ -32,14 +32,9 @@ final offlineAssetRepositoryProvider = Provider((ref) {
   return OfflineAssetRepository(ref.watch(driftProvider));
 });
 
-// Provider for cache stats that can be refreshed
-final cacheStatsProvider = FutureProvider.autoDispose<({int totalCount, int totalSize})>((ref) async {
-  final offlineAssetRepo = ref.watch(offlineAssetRepositoryProvider);
-  return await offlineAssetRepo.getCacheStats();
-});
-
-// Provider for sync stats counts
-final syncStatsCountsProvider =
+// Consolidated provider for sync stats and offline cache stats.
+// Note: This couples refresh behavior between the two UI sections.
+final syncStatusAndCacheStatsProvider =
     FutureProvider.autoDispose<
       ({
         int localAssetCount,
@@ -49,6 +44,8 @@ final syncStatsCountsProvider =
         int memoryCount,
         int localHashedCount,
         int cachedRemoteCount,
+        int totalCount,
+        int totalSize,
       })
     >((ref) async {
       final assetService = ref.watch(assetServiceProvider);
@@ -64,9 +61,12 @@ final syncStatsCountsProvider =
         memoryService.getCount(),
         assetService.getLocalHashedCount(),
         offlineAssetRepo.getCount(),
+        offlineAssetRepo.getCacheStats(),
       ]);
 
       final assetCounts = results[0] as (int, int);
+      final cacheStats = results[6] as ({int totalCount, int totalSize});
+
       return (
         localAssetCount: assetCounts.$1,
         remoteAssetCount: assetCounts.$2,
@@ -75,6 +75,8 @@ final syncStatsCountsProvider =
         memoryCount: results[3] as int,
         localHashedCount: results[4] as int,
         cachedRemoteCount: results[5] as int,
+        totalCount: cacheStats.totalCount,
+        totalSize: cacheStats.totalSize,
       );
     });
 
@@ -272,7 +274,7 @@ class _SyncStatsCounts extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final appSettingsService = ref.watch(appSettingsServiceProvider);
-    final syncStatsAsync = ref.watch(syncStatsCountsProvider);
+    final syncStatsAsync = ref.watch(syncStatusAndCacheStatsProvider);
 
     return syncStatsAsync.when(
       data: (stats) => Column(
@@ -438,7 +440,7 @@ class _OfflineCacheSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final cacheStatsAsync = ref.watch(cacheStatsProvider);
+    final cacheStatsAsync = ref.watch(syncStatusAndCacheStatsProvider);
 
     Future<void> clearCache() async {
       final confirmed = await showDialog<bool>(
@@ -492,8 +494,8 @@ class _OfflineCacheSection extends ConsumerWidget {
         // Delete all database records
         await offlineAssetRepo.deleteAll();
 
-        // Invalidate the cache stats provider to refresh the UI
-        ref.invalidate(cacheStatsProvider);
+        // Invalidate the consolidated provider to refresh both cache and sync stats
+        ref.invalidate(syncStatusAndCacheStatsProvider);
 
         if (context.mounted) {
           context.scaffoldMessenger.showSnackBar(

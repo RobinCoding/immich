@@ -100,26 +100,31 @@ class OfflineAssetRepository extends DriftDatabaseRepository {
     }
   }
 
+  /// Build a query for getting all assets with optional filtering and ordering
+  SimpleSelectStatement<$OfflineAssetEntityTable, OfflineAssetEntityData> _buildGetAllQuery({
+    int? limit,
+    int? offset,
+    bool orderByLastAccessed = false,
+  }) {
+    final query = _db.offlineAssetEntity.select();
+
+    if (orderByLastAccessed) {
+      query.orderBy([(row) => OrderingTerm.desc(row.lastAccessedAt)]);
+    } else {
+      query.orderBy([(row) => OrderingTerm.desc(row.downloadedAt)]);
+    }
+
+    if (limit != null) {
+      query.limit(limit, offset: offset);
+    }
+
+    return query;
+  }
+
   /// Get all cached offline assets
-  ///
-  /// Optional parameters:
-  /// - [limit]: Maximum number of assets to return
-  /// - [offset]: Number of assets to skip (for pagination)
-  /// - [orderByLastAccessed]: If true, orders by lastAccessedAt DESC
   Future<List<OfflineAsset>> getAll({int? limit, int? offset, bool orderByLastAccessed = false}) async {
     try {
-      final query = _db.offlineAssetEntity.select();
-
-      if (orderByLastAccessed) {
-        query.orderBy([(row) => OrderingTerm.desc(row.lastAccessedAt)]);
-      } else {
-        query.orderBy([(row) => OrderingTerm.desc(row.downloadedAt)]);
-      }
-
-      if (limit != null) {
-        query.limit(limit, offset: offset);
-      }
-
+      final query = _buildGetAllQuery(limit: limit, offset: offset, orderByLastAccessed: orderByLastAccessed);
       final results = await query.get();
       return results.map((data) => data.toDomain()).toList();
     } catch (e, stackTrace) {
@@ -133,18 +138,7 @@ class OfflineAssetRepository extends DriftDatabaseRepository {
   /// Returns a stream that emits updates when any asset changes.
   Stream<List<OfflineAsset>> watchAll({int? limit, bool orderByLastAccessed = false}) {
     try {
-      final query = _db.offlineAssetEntity.select();
-
-      if (orderByLastAccessed) {
-        query.orderBy([(row) => OrderingTerm.desc(row.lastAccessedAt)]);
-      } else {
-        query.orderBy([(row) => OrderingTerm.desc(row.downloadedAt)]);
-      }
-
-      if (limit != null) {
-        query.limit(limit);
-      }
-
+      final query = _buildGetAllQuery(limit: limit, orderByLastAccessed: orderByLastAccessed);
       return query.watch().map((results) => results.map((data) => data.toDomain()).toList());
     } catch (e, stackTrace) {
       _log.severe('Failed to watch all offline assets', e, stackTrace);
@@ -318,11 +312,7 @@ class OfflineAssetRepository extends DriftDatabaseRepository {
     try {
       final query = _db.offlineAssetEntity.select();
       final results = await query.get();
-
-      final totalCount = results.length;
-      final totalSize = results.fold<int>(0, (sum, asset) => sum + asset.fileSize);
-
-      return (totalCount: totalCount, totalSize: totalSize);
+      return _calculateCacheStats(results);
     } catch (e, stackTrace) {
       _log.severe('Failed to get cache stats', e, stackTrace);
       rethrow;
@@ -335,17 +325,18 @@ class OfflineAssetRepository extends DriftDatabaseRepository {
   Stream<({int totalCount, int totalSize})> watchCacheStats() {
     try {
       final query = _db.offlineAssetEntity.select();
-
-      return query.watch().map((results) {
-        final totalCount = results.length;
-        final totalSize = results.fold<int>(0, (sum, asset) => sum + asset.fileSize);
-
-        return (totalCount: totalCount, totalSize: totalSize);
-      });
+      return query.watch().map(_calculateCacheStats);
     } catch (e, stackTrace) {
       _log.severe('Failed to watch cache stats', e, stackTrace);
       rethrow;
     }
+  }
+
+  /// Calculate cache statistics from a list of assets
+  ({int totalCount, int totalSize}) _calculateCacheStats(List<OfflineAssetEntityData> results) {
+    final totalCount = results.length;
+    final totalSize = results.fold<int>(0, (sum, asset) => sum + asset.fileSize);
+    return (totalCount: totalCount, totalSize: totalSize);
   }
 
   /// Get the least recently accessed assets (for LRU eviction)

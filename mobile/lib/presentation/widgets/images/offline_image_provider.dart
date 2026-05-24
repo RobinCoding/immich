@@ -37,15 +37,7 @@ class OfflineThumbProvider extends CancellableImageProvider<OfflineThumbProvider
     final request = this.request = OfflineImageRequest(filePath: key.filePath);
     yield* loadRequest(request, decode, isFinal: true);
 
-    // Update last accessed timestamp if repository is available
-    if (key.remoteAssetId != null && key.repository != null) {
-      try {
-        await key.repository!.updateLastAccessedAt(key.remoteAssetId!, DateTime.now());
-        _log.fine('Updated lastAccessedAt for offline asset: ${key.remoteAssetId}');
-      } catch (e) {
-        _log.warning('Failed to update lastAccessedAt for ${key.remoteAssetId}: $e');
-      }
-    }
+    await _updateLastAccessedAt(key.remoteAssetId, key.repository, _log);
   }
 
   @override
@@ -130,15 +122,7 @@ class OfflineFullImageProvider extends CancellableImageProvider<OfflineFullImage
     final request = this.request = OfflineImageRequest(filePath: key.filePath);
     yield* loadRequest(request, decode, isFinal: true);
 
-    // Update last accessed timestamp if repository is available
-    if (key.remoteAssetId != null && key.repository != null) {
-      try {
-        await key.repository!.updateLastAccessedAt(key.remoteAssetId!, DateTime.now());
-        _log.fine('Updated lastAccessedAt for offline asset: ${key.remoteAssetId}');
-      } catch (e) {
-        _log.warning('Failed to update lastAccessedAt for ${key.remoteAssetId}: $e');
-      }
-    }
+    await _updateLastAccessedAt(key.remoteAssetId, key.repository, _log);
   }
 
   Stream<Object> _animatedCodec(OfflineFullImageProvider key, ImageDecoderCallback decode) async* {
@@ -160,15 +144,7 @@ class OfflineFullImageProvider extends CancellableImageProvider<OfflineFullImage
     }
     yield codec;
 
-    // Update last accessed timestamp if repository is available
-    if (key.remoteAssetId != null && key.repository != null) {
-      try {
-        await key.repository!.updateLastAccessedAt(key.remoteAssetId!, DateTime.now());
-        _log.fine('Updated lastAccessedAt for offline asset: ${key.remoteAssetId}');
-      } catch (e) {
-        _log.warning('Failed to update lastAccessedAt for ${key.remoteAssetId}: $e');
-      }
-    }
+    await _updateLastAccessedAt(key.remoteAssetId, key.repository, _log);
   }
 
   @override
@@ -184,4 +160,16 @@ class OfflineFullImageProvider extends CancellableImageProvider<OfflineFullImage
 
   @override
   int get hashCode => filePath.hashCode ^ thumbnailPath.hashCode ^ isAnimated.hashCode;
+}
+
+/// Helper function to update last accessed timestamp for offline assets
+Future<void> _updateLastAccessedAt(String? remoteAssetId, OfflineAssetRepository? repository, Logger log) async {
+  if (remoteAssetId != null && repository != null) {
+    try {
+      await repository.updateLastAccessedAt(remoteAssetId, DateTime.now());
+      log.fine('Updated lastAccessedAt for offline asset: $remoteAssetId');
+    } catch (e) {
+      log.warning('Failed to update lastAccessedAt for $remoteAssetId: $e');
+    }
+  }
 }

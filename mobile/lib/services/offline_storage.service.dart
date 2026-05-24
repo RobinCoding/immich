@@ -4,16 +4,11 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:logging/logging.dart';
 import 'package:path_provider/path_provider.dart';
 
-final offlineStorageServiceProvider = Provider(
-  (ref) => OfflineStorageService(),
-);
+/// Provider for the offline storage service singleton
+final offlineStorageServiceProvider = Provider((ref) => OfflineStorageService());
 
 /// Service for managing offline cached images in the device's file system.
-/// 
-/// Storage structure:
-/// - iOS: ~/Library/Application Support/offline_cache/
-/// - Android: /data/data/app.immich.mobile/files/offline_cache/
-/// 
+
 /// Directory structure:
 /// - offline_cache/
 ///   - thumbnails/
@@ -21,7 +16,7 @@ final offlineStorageServiceProvider = Provider(
 ///   - videos/
 class OfflineStorageService {
   final Logger _log = Logger("OfflineStorageService");
-  
+
   static const String _offlineCacheDir = 'offline_cache';
   static const String _thumbnailsDir = 'thumbnails';
   static const String _fullImagesDir = 'full_images';
@@ -37,7 +32,7 @@ class OfflineStorageService {
     try {
       final appDir = await getApplicationSupportDirectory();
       _cacheDirectory = Directory('${appDir.path}/$_offlineCacheDir');
-      
+
       // Create subdirectories
       _thumbnailsDirectory = Directory('${_cacheDirectory!.path}/$_thumbnailsDir');
       _fullImagesDirectory = Directory('${_cacheDirectory!.path}/$_fullImagesDir');
@@ -150,11 +145,7 @@ class OfflineStorageService {
   }
 
   /// Save thumbnail data to file
-  Future<String?> saveThumbnail(
-    String assetId,
-    String extension,
-    List<int> data,
-  ) async {
+  Future<String?> saveThumbnail(String assetId, String extension, List<int> data) async {
     try {
       final path = await getThumbnailPath(assetId, extension);
       final file = File(path);
@@ -168,11 +159,7 @@ class OfflineStorageService {
   }
 
   /// Save full image data to file
-  Future<String?> saveFullImage(
-    String assetId,
-    String extension,
-    List<int> data,
-  ) async {
+  Future<String?> saveFullImage(String assetId, String extension, List<int> data) async {
     try {
       final path = await getFullImagePath(assetId, extension);
       final file = File(path);
@@ -186,11 +173,7 @@ class OfflineStorageService {
   }
 
   /// Save video data to file
-  Future<String?> saveVideo(
-    String assetId,
-    String extension,
-    List<int> data,
-  ) async {
+  Future<String?> saveVideo(String assetId, String extension, List<int> data) async {
     try {
       final path = await getVideoPath(assetId, extension);
       final file = File(path);
@@ -255,16 +238,13 @@ class OfflineStorageService {
   }
 
   /// Delete all cached files for an asset (thumbnail, full image, and video)
-  Future<Map<String, bool>> deleteAllForAsset(
-    String assetId,
-    String extension,
-  ) async {
+  Future<Map<String, bool>> deleteAllForAsset(String assetId, String extension) async {
     final results = <String, bool>{};
-    
+
     results['thumbnail'] = await deleteThumbnail(assetId, extension);
     results['fullImage'] = await deleteFullImage(assetId, extension);
     results['video'] = await deleteVideo(assetId, extension);
-    
+
     _log.info('Deleted all files for asset $assetId: $results');
     return results;
   }
@@ -318,7 +298,7 @@ class OfflineStorageService {
       if (await dir.exists()) {
         await dir.delete(recursive: true);
         _log.info('Cleared all offline cache');
-        
+
         // Recreate the directory structure
         await initialize();
         return true;
@@ -352,12 +332,7 @@ class OfflineStorageService {
       return stats;
     } catch (error, stack) {
       _log.severe('Failed to get cache stats', error, stack);
-      return {
-        'thumbnails': 0,
-        'fullImages': 0,
-        'videos': 0,
-        'total': 0,
-      };
+      return {'thumbnails': 0, 'fullImages': 0, 'videos': 0, 'total': 0};
     }
   }
 

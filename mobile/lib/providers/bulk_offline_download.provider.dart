@@ -95,8 +95,8 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   bool _isCancelled = false;
   bool _isCheckingForNewAssets = false;
 
-  // Check for new assets every 5 seconds
-  static const Duration _monitoringInterval = Duration(seconds: 5);
+  // Check for new assets every 5 minutes
+  static const Duration _monitoringInterval = Duration(seconds: 5); //TODO: change to 5 min
 
   BulkOfflineDownloadNotifier({
     required OfflineDownloadService downloadService,
@@ -242,6 +242,54 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     }
   }
 
+  /// Initialize download state before starting
+  void _initializeDownloadState(int totalAssets) {
+    _isCancelled = false;
+    if (mounted) {
+      state = state.copyWith(
+        isDownloading: true,
+        totalAssets: totalAssets,
+        downloadedAssets: 0,
+        failedAssets: 0,
+        errorMessage: null,
+      );
+    }
+  }
+
+  /// Finalize download state after completion
+  void _finalizeDownloadState({String? errorMessage}) {
+    if (mounted) {
+      state = state.copyWith(isDownloading: false, errorMessage: errorMessage);
+    }
+  }
+
+  /// Download a list of assets sequentially
+  /// Returns true if download completed without cancellation
+  Future<bool> _downloadAssetList(List<RemoteAsset> assets, {bool checkEnabled = false}) async {
+    for (final asset in assets) {
+      // Check for cancellation
+      if (_isCancelled) {
+        _log.info('Download cancelled');
+        return false;
+      }
+
+      // Optionally check if auto-download is still enabled (for background monitoring)
+      if (checkEnabled && !state.isEnabled) {
+        _log.info('Auto-download disabled, stopping');
+        return false;
+      }
+
+      try {
+        await _downloadService.downloadAsset(asset, options: const DownloadOptions.thumbnailAndImage());
+      } catch (error) {
+        _log.warning('Error downloading asset ${asset.id}: $error');
+        // Continue with next asset even if one fails
+      }
+    }
+
+    return true;
+  }
+
   /// Download newly discovered assets
   Future<void> _downloadNewAssets(List<RemoteAsset> assets) async {
     if (assets.isEmpty) {
@@ -249,45 +297,16 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     }
 
     try {
-      _isCancelled = false;
-
-      if (mounted) {
-        state = state.copyWith(
-          isDownloading: true,
-          totalAssets: assets.length,
-          downloadedAssets: 0,
-          failedAssets: 0,
-          errorMessage: null,
-        );
-      }
-
+      _initializeDownloadState(assets.length);
       _log.info('Starting download of ${assets.length} new assets');
 
-      // Download assets one by one
-      for (final asset in assets) {
-        if (_isCancelled || !state.isEnabled) {
-          _log.info('Download cancelled or disabled');
-          break;
-        }
+      await _downloadAssetList(assets, checkEnabled: true);
 
-        try {
-          await _downloadService.downloadAsset(asset, options: const DownloadOptions.thumbnailAndImage());
-        } catch (error) {
-          _log.warning('Error downloading asset ${asset.id}: $error');
-          // Continue with next asset even if one fails
-        }
-      }
-
-      if (mounted) {
-        state = state.copyWith(isDownloading: false);
-      }
-
+      _finalizeDownloadState();
       _log.info('New assets download completed: ${state.downloadedAssets} succeeded, ${state.failedAssets} failed');
     } catch (error) {
       _log.severe('Error during new assets download: $error');
-      if (mounted) {
-        state = state.copyWith(isDownloading: false, errorMessage: error.toString());
-      }
+      _finalizeDownloadState(errorMessage: error.toString());
     }
   }
 
@@ -327,15 +346,7 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     }
 
     try {
-      _isCancelled = false;
-      state = state.copyWith(
-        isDownloading: true,
-        totalAssets: 0,
-        downloadedAssets: 0,
-        failedAssets: 0,
-        errorMessage: null,
-      );
-
+      _initializeDownloadState(0);
       _log.info('Starting bulk download of all remote assets');
 
       // Get all remote assets from the database
@@ -343,51 +354,30 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
 
       if (_isCancelled) {
         _log.info('Bulk download cancelled before starting');
-        if (mounted) {
-          state = state.copyWith(isDownloading: false);
-        }
+        _finalizeDownloadState();
         return;
       }
 
       if (remoteAssets.isEmpty) {
         _log.info('No remote assets to download');
-        if (mounted) {
-          state = state.copyWith(isDownloading: false);
-        }
+        _finalizeDownloadState();
         return;
       }
 
+      // Update total count now that we know how many assets to download
       if (mounted) {
         state = state.copyWith(totalAssets: remoteAssets.length);
       }
 
       _log.info('Found ${remoteAssets.length} remote assets to download');
 
-      // Download assets in batches
-      for (final asset in remoteAssets) {
-        if (_isCancelled) {
-          _log.info('Bulk download cancelled');
-          break;
-        }
+      await _downloadAssetList(remoteAssets);
 
-        try {
-          await _downloadService.downloadAsset(asset, options: const DownloadOptions.thumbnailAndImage());
-        } catch (error) {
-          _log.warning('Error downloading asset ${asset.id}: $error');
-          // Continue with next asset even if one fails
-        }
-      }
-
-      if (mounted) {
-        state = state.copyWith(isDownloading: false);
-      }
-
+      _finalizeDownloadState();
       _log.info('Bulk download completed: ${state.downloadedAssets} succeeded, ${state.failedAssets} failed');
     } catch (error) {
       _log.severe('Error during bulk download: $error');
-      if (mounted) {
-        state = state.copyWith(isDownloading: false, errorMessage: error.toString());
-      }
+      _finalizeDownloadState(errorMessage: error.toString());
     }
   }
 
