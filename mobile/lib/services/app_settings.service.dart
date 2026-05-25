@@ -15,6 +15,7 @@ enum AppSettingsEnum<T> {
   readonlyModeEnabled<bool>(StoreKey.readonlyModeEnabled, "readonlyModeEnabled", false),
   albumGridView<bool>(StoreKey.albumGridView, "albumGridView", false),
   autoDownloadRemoteAssets<bool>(StoreKey.autoDownloadRemoteAssets, null, false),
+  wifiOnlyBackgroundSync<bool>(StoreKey.wifiOnlyBackgroundSync, null, true),
   backupRequireCharging<bool>(StoreKey.backupRequireCharging, null, false),
   backupTriggerDelay<int>(StoreKey.backupTriggerDelay, null, 30);
 

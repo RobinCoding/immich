@@ -95,8 +95,10 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   bool _isCancelled = false;
   bool _isCheckingForNewAssets = false;
 
-  // Check for new assets every 5 minutes
-  static const Duration _monitoringInterval = Duration(seconds: 5); //TODO: change to 5 min
+  // Check for new assets every 5 seconds when app is open (foreground)
+  // TODO remove: Currently unused - foreground timer is disabled for background sync testing (see _startMonitoring)
+  // ignore: unused_field
+  static const Duration _monitoringInterval = Duration(seconds: 5); //TODO: change to 3 min maybe?
 
   BulkOfflineDownloadNotifier({
     required OfflineDownloadService downloadService,
@@ -113,6 +115,7 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   }
 
   /// Initialize the state by checking if auto-download is enabled
+  /// Background downloads are handled automatically by BackgroundWorkerBgService
   Future<void> _initialize() async {
     try {
       final isEnabled = _appSettingsService.getSetting<bool>(AppSettingsEnum.autoDownloadRemoteAssets);
@@ -123,7 +126,7 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       // Listen to download progress
       _progressSubscription = _downloadService.progressStream.listen(_onProgressUpdate);
 
-      // Start monitoring if enabled
+      // Start foreground monitoring if enabled (5 second interval for quick updates)
       if (isEnabled) {
         _startMonitoring();
       }
@@ -164,7 +167,19 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       return;
     }
 
-    _log.info('Starting background monitoring for new remote assets');
+    // TEMPORARILY DISABLED FOR BACKGROUND SYNC TESTING
+    // This allows testing the native iOS background worker integration in isolation
+    _log.info('Foreground monitoring DISABLED for background sync testing');
+    _log.info('Background sync will run via native iOS Background Worker');
+
+    if (mounted) {
+      state = state.copyWith(isMonitoring: false);
+    }
+
+    // COMMENTED OUT FOR TESTING - Uncomment to restore foreground sync
+    /*
+    _log.info('Starting foreground monitoring for new remote assets (5 second interval)');
+    _log.info('Background downloads will run via BackgroundWorkerBgService');
 
     if (mounted) {
       state = state.copyWith(isMonitoring: true);
@@ -177,6 +192,7 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     _monitoringTimer = Timer.periodic(_monitoringInterval, (_) {
       _checkForNewAssets();
     });
+    */
   }
 
   /// Stop monitoring for new remote assets
@@ -185,7 +201,7 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       return;
     }
 
-    _log.info('Stopping background monitoring');
+    _log.info('Stopping foreground monitoring');
     _monitoringTimer?.cancel();
     _monitoringTimer = null;
 
@@ -195,6 +211,8 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   }
 
   /// Check for new remote assets and download them
+  /// TODO remove: Currently unused - foreground timer is disabled for background sync testing (see _startMonitoring line 187)
+  // ignore: unused_element
   Future<void> _checkForNewAssets() async {
     // Prevent concurrent checks
     if (_isCheckingForNewAssets) {
@@ -311,6 +329,8 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   }
 
   /// Toggle auto-download setting
+  /// Foreground: 5 second monitoring when app is open
+  /// Background: Handled automatically by BackgroundWorkerBgService
   Future<void> toggleAutoDownload(bool enabled) async {
     try {
       await _appSettingsService.setSetting(AppSettingsEnum.autoDownloadRemoteAssets, enabled);
@@ -320,12 +340,12 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       }
 
       if (enabled) {
-        // Start monitoring for new assets
+        // Start foreground monitoring for new assets (5 second interval)
         _startMonitoring();
         // Start downloading existing assets
         await startBulkDownload();
       } else {
-        // Stop monitoring
+        // Stop foreground monitoring
         _stopMonitoring();
         // Cancel any ongoing downloads when disabled
         await cancelBulkDownload();

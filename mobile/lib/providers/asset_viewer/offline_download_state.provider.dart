@@ -39,8 +39,8 @@ class OfflineDownloadState {
 }
 
 /// Provider for managing offline download state of a specific asset
-final offlineDownloadStateProvider =
-    StateNotifierProvider.family<OfflineDownloadStateNotifier, OfflineDownloadState, String>((ref, assetId) {
+final offlineDownloadStateProvider = StateNotifierProvider.family
+    .autoDispose<OfflineDownloadStateNotifier, OfflineDownloadState, String>((ref, assetId) {
       return OfflineDownloadStateNotifier(assetId: assetId, downloadService: ref.watch(offlineDownloadServiceProvider));
     });
 

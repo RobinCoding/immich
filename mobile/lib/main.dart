@@ -33,6 +33,7 @@ import 'package:immich_mobile/providers/theme.provider.dart';
 import 'package:immich_mobile/routing/app_navigation_observer.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/services/deep_link.service.dart';
+import 'package:immich_mobile/services/workmanager_callback.service.dart';
 import 'package:immich_mobile/theme/dynamic_theme.dart';
 import 'package:immich_mobile/theme/theme_data.dart';
 import 'package:immich_mobile/utils/bootstrap.dart';
@@ -45,6 +46,7 @@ import 'package:immich_ui/immich_ui.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:logging/logging.dart';
 import 'package:timezone/data/latest.dart';
+import 'package:workmanager/workmanager.dart';
 
 void main() async {
   try {
@@ -57,9 +59,31 @@ void main() async {
     await workerManagerPatch.init(dynamicSpawning: true, isolatesCount: max(Platform.numberOfProcessors - 1, 5));
     await migrateDatabaseIfNeeded(drift);
 
+    // Initialize Workmanager for background sync
+    await _initializeWorkmanager();
+
     runApp(ProviderScope(overrides: [driftProvider.overrideWith(driftOverride(drift))], child: const MainWidget()));
   } catch (error, stack) {
     runApp(BootstrapErrorWidget(error: error.toString(), stack: stack.toString()));
+  }
+}
+
+/// Initialize Workmanager for background synchronization.
+/// This sets up the callback dispatcher that will be invoked by the OS
+/// when background tasks are scheduled to run.
+Future<void> _initializeWorkmanager() async {
+  final log = Logger('WorkmanagerInit');
+
+  try {
+    log.info('Initializing Workmanager for background sync');
+
+    await Workmanager().initialize(workmanagerCallbackDispatcher, isInDebugMode: kDebugMode);
+
+    log.info('Workmanager initialized successfully');
+  } catch (error, stackTrace) {
+    log.severe('Failed to initialize Workmanager - background sync will not be available', error, stackTrace);
+    // Don't rethrow - app should continue even if Workmanager fails to initialize
+    // Background sync will simply not be available
   }
 }
 

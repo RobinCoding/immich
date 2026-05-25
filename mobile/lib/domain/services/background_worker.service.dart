@@ -21,6 +21,7 @@ import 'package:immich_mobile/providers/infrastructure/platform.provider.dart' s
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/services/app_settings.service.dart';
 import 'package:immich_mobile/services/auth.service.dart';
+import 'package:immich_mobile/services/background_sync.service.dart';
 import 'package:immich_mobile/services/foreground_upload.service.dart';
 import 'package:immich_mobile/services/localization.service.dart';
 import 'package:immich_mobile/utils/bootstrap.dart';
@@ -152,6 +153,9 @@ class BackgroundWorkerBgService extends BackgroundWorkerFlutterApi {
       } finally {
         cancelTimer?.cancel();
       }
+
+      // After backup, check for new remote assets to download (if auto-download is enabled)
+      await _handleOfflineDownload();
     } catch (error, stack) {
       _logger.severe("Failed to complete $debugLabel", error, stack);
     } finally {
@@ -244,6 +248,52 @@ class BackgroundWorkerBgService extends BackgroundWorkerFlutterApi {
       },
       (error, stack) {
         dPrint(() => "Error in backup zone $error, $stack");
+      },
+    );
+  }
+
+  Future<void> _handleOfflineDownload() async {
+    await runZonedGuarded(
+      () async {
+        _logger.info("=== _handleOfflineDownload() called ===");
+
+        if (_isCleanedUp) {
+          _logger.warning("_handleOfflineDownload: Service already cleaned up, skipping");
+          return;
+        }
+
+        // Check if auto-download is enabled
+        final isAutoDownloadEnabled =
+            _ref?.read(appSettingsServiceProvider).getSetting<bool>(AppSettingsEnum.autoDownloadRemoteAssets) ?? false;
+
+        _logger.info("_handleOfflineDownload: autoDownloadRemoteAssets = $isAutoDownloadEnabled");
+
+        if (!isAutoDownloadEnabled) {
+          _logger.info("Auto-download is disabled. Skipping offline download routine");
+          return;
+        }
+
+        final currentUser = _ref?.read(currentUserProvider);
+        if (currentUser == null) {
+          _logger.warning("No current user found. Skipping offline download from background");
+          return;
+        }
+
+        _logger.info("Starting background offline download check for user: ${currentUser.id}");
+
+        // Use the existing BackgroundSyncService to check and download new assets
+        final sw = Stopwatch()..start();
+        final success = await BackgroundSyncService.checkAndDownloadNewAssets(_drift);
+        sw.stop();
+
+        if (success) {
+          _logger.info("Background offline download completed successfully in ${sw.elapsed.inSeconds}s");
+        } else {
+          _logger.warning("Background offline download completed with issues in ${sw.elapsed.inSeconds}s");
+        }
+      },
+      (error, stack) {
+        _logger.severe("Error in offline download zone", error, stack);
       },
     );
   }
