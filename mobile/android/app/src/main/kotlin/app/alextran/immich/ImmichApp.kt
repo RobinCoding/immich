@@ -3,15 +3,16 @@ package app.alextran.immich
 import android.app.Application
 import android.os.Handler
 import android.os.Looper
+import androidx.work.Configuration
+import androidx.work.WorkManager
 import app.alextran.immich.background.BackgroundEngineLock
 import app.alextran.immich.background.BackgroundWorkerApiImpl
 
 class ImmichApp : Application() {
   override fun onCreate() {
     super.onCreate()
-    // WorkManager is now automatically initialized by the system
-    // This allows native background workers to function properly
-    
+    val config = Configuration.Builder().build()
+    WorkManager.initialize(this, config)
     // always start BackupWorker after WorkManager init; this fixes the following bug:
     // After the process is killed (by user or system), the first trigger (taking a new picture) is lost.
     // Thus, the BackupWorker is not started. If the system kills the process after each initialization
