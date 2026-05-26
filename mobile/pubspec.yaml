@@ -102,6 +102,7 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+  intl_utils: ^2.8.7
   mocktail: ^1.0.5
   # Type safe platform code
   pigeon: ^26.3.4
