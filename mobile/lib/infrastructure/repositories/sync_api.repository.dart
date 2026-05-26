@@ -90,6 +90,7 @@ class SyncApiRepository {
     final reset = onReset ?? () {};
 
     try {
+      _logger.info("Starting sync stream request to server");
       final response = await client.send(request);
 
       if (response.statusCode != 200) {
@@ -97,6 +98,7 @@ class SyncApiRepository {
         throw ApiException(response.statusCode, 'Failed to get sync stream: $errorBody');
       }
 
+      int totalEventsReceived = 0;
       await for (final chunk in response.stream.transform(utf8.decoder)) {
         if (shouldAbort) {
           break;
@@ -111,13 +113,21 @@ class SyncApiRepository {
           continue;
         }
 
-        await onData(_parseLines(lines), abort, reset);
+        final events = _parseLines(lines);
+        totalEventsReceived += events.length;
+        _logger.info("Processing batch of ${events.length} events (total so far: $totalEventsReceived)");
+        await onData(events, abort, reset);
         lines.clear();
       }
 
       if (lines.isNotEmpty && !shouldAbort) {
-        await onData(_parseLines(lines), abort, reset);
+        final events = _parseLines(lines);
+        totalEventsReceived += events.length;
+        _logger.info("Processing final batch of ${events.length} events (total: $totalEventsReceived)");
+        await onData(events, abort, reset);
       }
+
+      _logger.info("Sync stream completed - received $totalEventsReceived total events from server");
     } catch (error, stack) {
       return Future.error(error, stack);
     }

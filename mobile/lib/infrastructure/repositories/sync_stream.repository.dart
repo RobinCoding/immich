@@ -195,6 +195,7 @@ class SyncStreamRepository extends DriftDatabaseRepository {
 
   Future<void> updateAssetsV1(Iterable<SyncAssetV1> data, {String debugLabel = 'user'}) async {
     try {
+      _logger.info("updateAssetsV1 ($debugLabel): Processing ${data.length} assets");
       await _db.batch((batch) {
         for (final asset in data) {
           final companion = RemoteAssetEntityCompanion(
@@ -234,6 +235,7 @@ class SyncStreamRepository extends DriftDatabaseRepository {
 
   Future<void> updateAssetsV2(Iterable<SyncAssetV2> data, {String debugLabel = 'user'}) async {
     try {
+      _logger.info("updateAssetsV2 ($debugLabel): Processing ${data.length} assets");
       await _db.batch((batch) {
         for (final asset in data) {
           final companion = RemoteAssetEntityCompanion(

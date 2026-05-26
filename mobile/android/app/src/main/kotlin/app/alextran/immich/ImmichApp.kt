@@ -10,7 +10,7 @@ class ImmichApp : Application() {
   override fun onCreate() {
     super.onCreate()
     // WorkManager is now automatically initialized by the system
-    // This allows both native background workers and Flutter workmanager plugin to work together
+    // This allows native background workers to function properly
     
     // always start BackupWorker after WorkManager init; this fixes the following bug:
     // After the process is killed (by user or system), the first trigger (taking a new picture) is lost.

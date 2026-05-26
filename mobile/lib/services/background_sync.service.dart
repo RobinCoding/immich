@@ -11,7 +11,6 @@ import 'package:immich_mobile/services/offline_storage.service.dart';
 import 'package:logging/logging.dart';
 
 /// Background sync service for checking and downloading new remote assets
-/// This service is designed to run in background tasks via workmanager
 class BackgroundSyncService {
   static final Logger _log = Logger('BackgroundSyncService');
 

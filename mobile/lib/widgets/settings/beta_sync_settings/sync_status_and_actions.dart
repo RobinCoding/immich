@@ -435,6 +435,71 @@ class _SyncStatsCounts extends ConsumerWidget {
   }
 }
 
+class _BackgroundSyncControls extends ConsumerWidget {
+  const _BackgroundSyncControls();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bulkDownloadState = ref.watch(bulkOfflineDownloadProvider);
+
+    if (!bulkDownloadState.isEnabled) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      children: [
+        // WiFi-only toggle
+        SwitchListTile(
+          title: Text(
+            "wifi_only_background_sync".t(context: context),
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          ),
+          subtitle: Text("wifi_only_background_sync_description".t(context: context)),
+          secondary: const Icon(Icons.wifi),
+          value: ref.watch(appSettingsServiceProvider).getSetting<bool>(AppSettingsEnum.wifiOnlyBackgroundSync),
+          onChanged: (value) {
+            ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.wifiOnlyBackgroundSync, value);
+          },
+        ),
+        // Informational text about background sync behavior
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 20, color: context.colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        "background_sync_info_title".t(context: context),
+                        style: context.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: context.colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "• ${"background_sync_foreground".t(context: context)}\n"
+                    "• ${"background_sync_background".t(context: context)}\n"
+                    "• ${"background_sync_wifi_only".t(context: context)}",
+                    style: context.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _OfflineCacheSection extends ConsumerWidget {
   const _OfflineCacheSection();
 
@@ -551,55 +616,7 @@ class _OfflineCacheSection extends ConsumerWidget {
               ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
             },
           ),
-          // WiFi-only toggle (only visible when auto-download is enabled)
-          if (bulkDownloadState.isEnabled)
-            SwitchListTile(
-              title: Text(
-                "wifi_only_background_sync".t(context: context),
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-              subtitle: Text("wifi_only_background_sync_description".t(context: context)),
-              secondary: const Icon(Icons.wifi),
-              value: ref.watch(appSettingsServiceProvider).getSetting<bool>(AppSettingsEnum.wifiOnlyBackgroundSync),
-              onChanged: (value) {
-                ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.wifiOnlyBackgroundSync, value);
-              },
-            ),
-          // Informational text about background sync behavior
-          if (bulkDownloadState.isEnabled)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.info_outline, size: 20, color: context.colorScheme.primary),
-                          const SizedBox(width: 8),
-                          Text(
-                            "background_sync_info_title".t(context: context),
-                            style: context.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: context.colorScheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "• ${"background_sync_foreground".t(context: context)}\n"
-                        "• ${"background_sync_background".t(context: context)}\n"
-                        "• ${"background_sync_wifi_only".t(context: context)}",
-                        style: context.textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          const _BackgroundSyncControls(),
           // Show download progress when downloading
           if (bulkDownloadState.isDownloading) ...[
             Padding(
@@ -685,55 +702,7 @@ class _OfflineCacheSection extends ConsumerWidget {
               ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
             },
           ),
-          // WiFi-only toggle (only visible when auto-download is enabled)
-          if (bulkDownloadState.isEnabled)
-            SwitchListTile(
-              title: Text(
-                "wifi_only_background_sync".t(context: context),
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-              subtitle: Text("wifi_only_background_sync_description".t(context: context)),
-              secondary: const Icon(Icons.wifi),
-              value: ref.watch(appSettingsServiceProvider).getSetting<bool>(AppSettingsEnum.wifiOnlyBackgroundSync),
-              onChanged: (value) {
-                ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.wifiOnlyBackgroundSync, value);
-              },
-            ),
-          // Informational text about background sync behavior
-          if (bulkDownloadState.isEnabled)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.info_outline, size: 20, color: context.colorScheme.primary),
-                          const SizedBox(width: 8),
-                          Text(
-                            "background_sync_info_title".t(context: context),
-                            style: context.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: context.colorScheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "• ${"background_sync_foreground".t(context: context)}\n"
-                        "• ${"background_sync_background".t(context: context)}\n"
-                        "• ${"background_sync_wifi_only".t(context: context)}",
-                        style: context.textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          const _BackgroundSyncControls(),
           // Show download progress when downloading
           if (bulkDownloadState.isDownloading) ...[
             Padding(
@@ -816,55 +785,7 @@ class _OfflineCacheSection extends ConsumerWidget {
               ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
             },
           ),
-          // WiFi-only toggle (only visible when auto-download is enabled)
-          if (bulkDownloadState.isEnabled)
-            SwitchListTile(
-              title: Text(
-                "wifi_only_background_sync".t(context: context),
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-              subtitle: Text("wifi_only_background_sync_description".t(context: context)),
-              secondary: const Icon(Icons.wifi),
-              value: ref.watch(appSettingsServiceProvider).getSetting<bool>(AppSettingsEnum.wifiOnlyBackgroundSync),
-              onChanged: (value) {
-                ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.wifiOnlyBackgroundSync, value);
-              },
-            ),
-          // Informational text about background sync behavior
-          if (bulkDownloadState.isEnabled)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.info_outline, size: 20, color: context.colorScheme.primary),
-                          const SizedBox(width: 8),
-                          Text(
-                            "background_sync_info_title".t(context: context),
-                            style: context.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: context.colorScheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "• ${"background_sync_foreground".t(context: context)}\n"
-                        "• ${"background_sync_background".t(context: context)}\n"
-                        "• ${"background_sync_wifi_only".t(context: context)}",
-                        style: context.textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          const _BackgroundSyncControls(),
           // Show download progress when downloading
           if (bulkDownloadState.isDownloading) ...[
             Padding(
