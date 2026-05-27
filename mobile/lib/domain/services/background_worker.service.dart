@@ -281,9 +281,14 @@ class BackgroundWorkerBgService extends BackgroundWorkerFlutterApi {
 
         _logger.info("Starting background offline download check for user: ${currentUser.id}");
 
+        final isAppInForeground = false; // Background worker only runs when app is not in foreground
+
         // Use the existing BackgroundSyncService to check and download new assets
         final sw = Stopwatch()..start();
-        final success = await BackgroundSyncService.checkAndDownloadNewAssets(_drift);
+        final success = await BackgroundSyncService.checkAndDownloadNewAssets(
+          _drift,
+          isAppInForeground: isAppInForeground,
+        );
         sw.stop();
 
         if (success) {

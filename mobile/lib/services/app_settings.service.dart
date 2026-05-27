@@ -15,9 +15,11 @@ enum AppSettingsEnum<T> {
   readonlyModeEnabled<bool>(StoreKey.readonlyModeEnabled, "readonlyModeEnabled", false),
   albumGridView<bool>(StoreKey.albumGridView, "albumGridView", false),
   autoDownloadRemoteAssets<bool>(StoreKey.autoDownloadRemoteAssets, null, false),
-  wifiOnlyBackgroundSync<bool>(StoreKey.wifiOnlyBackgroundSync, null, true),
+  allowMobileDataBackgroundSync<bool>(StoreKey.allowMobileDataBackgroundSync, null, false),
   backupRequireCharging<bool>(StoreKey.backupRequireCharging, null, false),
-  backupTriggerDelay<int>(StoreKey.backupTriggerDelay, null, 30);
+  backupTriggerDelay<int>(StoreKey.backupTriggerDelay, null, 30),
+  limitDownloadedAssets<bool>(StoreKey.limitDownloadedAssets, null, false),
+  maxDownloadedAssets<int>(StoreKey.maxDownloadedAssets, null, 1000);
 
   const AppSettingsEnum(this.storeKey, this.hiveKey, this.defaultValue);
 

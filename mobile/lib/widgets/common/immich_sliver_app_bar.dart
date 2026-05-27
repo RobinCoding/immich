@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:auto_route/auto_route.dart';
@@ -10,6 +11,7 @@ import 'package:immich_mobile/domain/models/setting.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/models/server_info/server_info.model.dart';
 import 'package:immich_mobile/providers/backup/drift_backup.provider.dart';
+import 'package:immich_mobile/providers/bulk_offline_download.provider.dart';
 import 'package:immich_mobile/providers/cast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/readonly_mode.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/setting.provider.dart';
@@ -74,6 +76,7 @@ class ImmichSliverAppBar extends ConsumerWidget {
                 icon: Icon(isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded),
               ),
             if (actions != null) ...actions!,
+            if (showUploadButton && !isReadonlyModeEnabled) const _DownloadIndicator(),
             if (showUploadButton && !isReadonlyModeEnabled) const _BackupIndicator(),
             const _ProfileIndicator(),
             const SizedBox(width: 8),
@@ -252,6 +255,114 @@ class _BackupIndicator extends ConsumerWidget {
         );
       },
     );
+  }
+}
+
+// Download progress indicator
+class _DownloadIndicator extends ConsumerStatefulWidget {
+  const _DownloadIndicator();
+
+  @override
+  ConsumerState<_DownloadIndicator> createState() => _DownloadIndicatorState();
+}
+
+class _DownloadIndicatorState extends ConsumerState<_DownloadIndicator> {
+  Timer? _hideTimer;
+  bool _shouldShow = false;
+  bool _wasDownloading = false;
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final downloadState = ref.watch(bulkOfflineDownloadProvider);
+
+    // Track download state transitions
+    if (downloadState.isDownloading) {
+      _wasDownloading = true;
+      _shouldShow = true;
+      _hideTimer?.cancel();
+    } else if (_wasDownloading && !downloadState.isDownloading) {
+      // Download just completed - start 5 second timer
+      _wasDownloading = false;
+      _hideTimer?.cancel();
+      _hideTimer = Timer(const Duration(seconds: 5), () {
+        if (mounted) {
+          setState(() {
+            _shouldShow = false;
+          });
+        }
+      });
+    }
+
+    // Only show if downloading or within 5 seconds after download
+    if (!_shouldShow && !downloadState.isDownloading) {
+      return const SizedBox.shrink();
+    }
+
+    final indicatorIcon = _getDownloadBadgeIcon(context, downloadState);
+
+    return AnimatedOpacity(
+      opacity: _shouldShow || downloadState.isDownloading ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 500),
+      child: IconButton(
+        onPressed: () => context.pushRoute(const SettingsRoute()),
+        icon: Badge(
+          label: indicatorIcon,
+          backgroundColor: Colors.transparent,
+          alignment: Alignment.bottomRight,
+          isLabelVisible: indicatorIcon != null,
+          offset: const Offset(-2, -12),
+          child: Icon(Icons.download_rounded, size: _kBadgeWidgetSize, color: context.primaryColor),
+        ),
+      ),
+    );
+  }
+
+  Widget? _getDownloadBadgeIcon(BuildContext context, BulkDownloadState downloadState) {
+    final isDarkTheme = context.isDarkTheme;
+    final iconColor = isDarkTheme ? Colors.white : Colors.black;
+
+    // Show nothing if auto-download is not enabled
+    if (!downloadState.isEnabled) {
+      return null;
+    }
+
+    // Show error if there's an error message
+    if (downloadState.errorMessage != null) {
+      return _BadgeLabel(
+        Icon(Icons.warning_rounded, size: 12, color: context.colorScheme.error, semanticLabel: 'download_error'.tr()),
+        backgroundColor: context.colorScheme.errorContainer,
+      );
+    }
+
+    // Show progress indicator when downloading
+    if (downloadState.isDownloading) {
+      return _BadgeLabel(
+        Container(
+          padding: const EdgeInsets.all(3.5),
+          child: Theme(
+            data: context.themeData.copyWith(
+              progressIndicatorTheme: context.themeData.progressIndicatorTheme.copyWith(year2023: true),
+            ),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              strokeCap: StrokeCap.round,
+              value: downloadState.progress > 0 ? downloadState.progress : null,
+              valueColor: AlwaysStoppedAnimation<Color>(iconColor),
+              semanticsLabel: 'downloading_assets'.tr(),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Show check mark when enabled but not downloading
+    return _BadgeLabel(Icon(Icons.check_outlined, size: 9, color: iconColor, semanticLabel: 'download_enabled'.tr()));
   }
 }
 

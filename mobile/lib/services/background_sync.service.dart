@@ -16,9 +16,19 @@ class BackgroundSyncService {
 
   /// Check for new remote assets and download them
   /// This is the main entry point for background tasks
-  static Future<bool> checkAndDownloadNewAssets(Drift db) async {
+  ///
+  /// [isAppInForeground] - If true, skips download to avoid conflicts with foreground downloads
+  static Future<bool> checkAndDownloadNewAssets(Drift db, {bool isAppInForeground = false}) async {
     try {
       _log.info('=== Background sync: Starting check for new assets ===');
+
+      // Skip background downloads if app is in foreground
+      // This prevents conflicts with foreground download progress tracking
+      if (isAppInForeground) {
+        _log.info('Background sync: App is in foreground, skipping background download');
+        _log.info('Background sync: Foreground download path will handle new assets with progress UI');
+        return true;
+      }
 
       // Check WiFi-only mode and network connectivity
       _log.info('Background sync: Checking network connectivity...');
@@ -77,20 +87,20 @@ class BackgroundSyncService {
     }
   }
 
-  /// Check network connectivity and WiFi-only mode
+  /// Check network connectivity and mobile data settings
   /// Returns true if sync should proceed, false if it should be skipped
   static Future<bool> _checkNetworkConnectivity() async {
     try {
-      // Check if WiFi-only mode is enabled
-      final isWifiOnly = Store.get(
-        AppSettingsEnum.wifiOnlyBackgroundSync.storeKey,
-        AppSettingsEnum.wifiOnlyBackgroundSync.defaultValue,
+      // Check if mobile data downloads are allowed
+      final allowMobileData = Store.get(
+        AppSettingsEnum.allowMobileDataBackgroundSync.storeKey,
+        AppSettingsEnum.allowMobileDataBackgroundSync.defaultValue,
       );
 
-      _log.info('Background sync: WiFi-only mode is ${isWifiOnly ? "enabled" : "disabled"}');
+      _log.info('Background sync: Mobile data downloads ${allowMobileData ? "allowed" : "not allowed"}');
 
-      if (!isWifiOnly) {
-        _log.info('Background sync: WiFi-only mode disabled, proceeding with sync');
+      if (allowMobileData) {
+        _log.info('Background sync: Mobile data allowed, proceeding with sync');
         return true;
       }
 
@@ -102,12 +112,12 @@ class BackgroundSyncService {
 
       if (!isOnWifi) {
         _log.info(
-          'Background sync: WiFi-only mode enabled, but not on WiFi. Current connectivity: $connectivityResult',
+          'Background sync: Mobile data not allowed and not on WiFi. Current connectivity: $connectivityResult',
         );
         return false;
       }
 
-      _log.info('Background sync: WiFi-only mode enabled and on WiFi, proceeding with sync');
+      _log.info('Background sync: Mobile data not allowed but on WiFi, proceeding with sync');
       return true;
     } catch (error, stack) {
       _log.warning('Background sync: Error checking network connectivity: $error\n$stack');

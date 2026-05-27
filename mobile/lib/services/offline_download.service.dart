@@ -196,14 +196,20 @@ class OfflineDownloadService {
         return null;
       }
 
-      // Check if already cached
+      // Check if already cached and verify files still exist on disk
       final existingAsset = await _repository.getByRemoteAssetId(assetId);
       if (existingAsset != null) {
-        _log.info('Asset $assetId is already cached');
-        await _repository.updateLastAccessedAt(assetId, DateTime.now());
-        _emitProgress(assetId, DownloadStatus.completed);
-        completer.complete(existingAsset);
-        return existingAsset;
+        final hasCachedFiles = await _hasValidCachedFiles(existingAsset, asset);
+        if (hasCachedFiles) {
+          _log.info('Asset $assetId is already cached');
+          await _repository.updateLastAccessedAt(assetId, DateTime.now());
+          _emitProgress(assetId, DownloadStatus.completed);
+          completer.complete(existingAsset);
+          return existingAsset;
+        }
+
+        _log.warning('Asset $assetId has stale offline cache metadata, removing stale database record');
+        await _repository.delete(assetId);
       }
 
       // Start download
@@ -486,6 +492,30 @@ class OfflineDownloadService {
   // ============================================================================
   // HELPER METHODS
   // ============================================================================
+
+  Future<bool> _hasValidCachedFiles(OfflineAsset offlineAsset, RemoteAsset asset) async {
+    final extension = _getExtensionFromAsset(asset);
+
+    if (offlineAsset.hasThumbnail && !await _storageService.thumbnailExists(asset.id, extension)) {
+      return false;
+    }
+
+    if (asset.isImage && offlineAsset.hasFullImage && !await _storageService.fullImageExists(asset.id, extension)) {
+      return false;
+    }
+
+    if (offlineAsset.hasVideo) {
+      if (asset.isMotionPhoto) {
+        if (!await _storageService.videoExists(asset.id, 'mov')) {
+          return false;
+        }
+      } else if (!await _storageService.videoExists(asset.id, extension)) {
+        return false;
+      }
+    }
+
+    return offlineAsset.hasThumbnail;
+  }
 
   /// Get file extension from asset
   String _getExtensionFromAsset(RemoteAsset asset) {

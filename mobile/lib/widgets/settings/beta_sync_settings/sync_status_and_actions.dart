@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/domain/models/store.model.dart';
+import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
 import 'package:immich_mobile/extensions/translate_extensions.dart';
@@ -20,6 +22,7 @@ import 'package:immich_mobile/providers/infrastructure/trash_sync.provider.dart'
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/sync_status.provider.dart';
 import 'package:immich_mobile/services/app_settings.service.dart';
+import 'package:immich_mobile/services/offline_storage.service.dart';
 import 'package:immich_mobile/utils/bytes_units.dart';
 import 'package:immich_mobile/widgets/settings/beta_sync_settings/entity_count_tile.dart';
 import 'package:immich_mobile/widgets/settings/setting_group_title.dart';
@@ -449,51 +452,26 @@ class _BackgroundSyncControls extends ConsumerWidget {
     return Column(
       children: [
         // WiFi-only toggle
-        SwitchListTile(
-          title: Text(
-            "wifi_only_background_sync".t(context: context),
-            style: const TextStyle(fontWeight: FontWeight.w500),
-          ),
-          subtitle: Text("wifi_only_background_sync_description".t(context: context)),
-          secondary: const Icon(Icons.wifi),
-          value: ref.watch(appSettingsServiceProvider).getSetting<bool>(AppSettingsEnum.wifiOnlyBackgroundSync),
-          onChanged: (value) {
-            ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.wifiOnlyBackgroundSync, value);
-          },
-        ),
-        // Informational text about background sync behavior
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.info_outline, size: 20, color: context.colorScheme.primary),
-                      const SizedBox(width: 8),
-                      Text(
-                        "background_sync_info_title".t(context: context),
-                        style: context.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: context.colorScheme.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    "• ${"background_sync_foreground".t(context: context)}\n"
-                    "• ${"background_sync_background".t(context: context)}\n"
-                    "• ${"background_sync_wifi_only".t(context: context)}",
-                    style: context.textTheme.bodySmall,
-                  ),
-                ],
+        StreamBuilder<bool?>(
+          stream: Store.watch(StoreKey.allowMobileDataBackgroundSync),
+          initialData:
+              Store.tryGet(StoreKey.allowMobileDataBackgroundSync) ??
+              AppSettingsEnum.allowMobileDataBackgroundSync.defaultValue,
+          builder: (context, snapshot) {
+            final allowMobileData = snapshot.data ?? false;
+            return SwitchListTile(
+              title: Text(
+                "wifi_only_background_sync".t(context: context),
+                style: const TextStyle(fontWeight: FontWeight.w500),
               ),
-            ),
-          ),
+              subtitle: Text("wifi_only_background_sync_description".t(context: context)),
+              secondary: const Icon(Icons.wifi),
+              value: allowMobileData,
+              onChanged: (value) {
+                ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.allowMobileDataBackgroundSync, value);
+              },
+            );
+          },
         ),
       ],
     );
@@ -502,6 +480,76 @@ class _BackgroundSyncControls extends ConsumerWidget {
 
 class _OfflineCacheSection extends ConsumerWidget {
   const _OfflineCacheSection();
+
+  /// Calculate dynamic slider max based on remote asset count
+  /// Formula: Round up to next 100 + buffer of 100
+  /// Min: 100, Max: 500000 (to prevent unreasonably large sliders)
+  double _calculateDynamicMax(int remoteAssetCount) {
+    // Round up to the next 100 and add 100 as buffer
+    final roundedUp = ((remoteAssetCount / 100).ceil() * 100) + 100;
+    return roundedUp.toDouble().clamp(10.0, 500000.0); // TODO: set min to 100
+  }
+
+  /// Build the download limit controls (toggle + slider)
+  Widget _buildDownloadLimitControls(BuildContext context, WidgetRef ref, {required int remoteAssetCount}) {
+    return StreamBuilder<bool?>(
+      stream: Store.watch(StoreKey.limitDownloadedAssets),
+      initialData: Store.tryGet(StoreKey.limitDownloadedAssets) ?? AppSettingsEnum.limitDownloadedAssets.defaultValue,
+      builder: (context, limitSnapshot) {
+        final limitEnabled = limitSnapshot.data ?? false;
+
+        return StreamBuilder<int?>(
+          stream: Store.watch(StoreKey.maxDownloadedAssets),
+          initialData: Store.tryGet(StoreKey.maxDownloadedAssets) ?? AppSettingsEnum.maxDownloadedAssets.defaultValue,
+          builder: (context, maxSnapshot) {
+            final maxDownloaded = maxSnapshot.data ?? 1000;
+
+            return Column(
+              children: [
+                SwitchListTile(
+                  title: Text(
+                    "offline_download_limit_toggle".t(context: context),
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: Text("offline_download_limit_description".t(context: context)),
+                  secondary: const Icon(Icons.filter_list),
+                  value: limitEnabled,
+                  onChanged: (value) {
+                    ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.limitDownloadedAssets, value);
+                  },
+                ),
+                if (limitEnabled)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "offline_download_limit_count".t(context: context, args: {'count': maxDownloaded.toString()}),
+                          style: context.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 8),
+                        Slider(
+                          value: maxDownloaded.toDouble().clamp(100.0, _calculateDynamicMax(remoteAssetCount)),
+                          min: 10,
+                          max: _calculateDynamicMax(remoteAssetCount),
+                          label: maxDownloaded.toString(),
+                          onChanged: (value) {
+                            ref
+                                .read(appSettingsServiceProvider)
+                                .setSetting(AppSettingsEnum.maxDownloadedAssets, value.toInt());
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -530,34 +578,23 @@ class _OfflineCacheSection extends ConsumerWidget {
 
       try {
         final offlineAssetRepo = ref.read(offlineAssetRepositoryProvider);
+        final offlineStorageService = ref.read(offlineStorageServiceProvider);
 
-        // Get all cached assets
-        final assets = await offlineAssetRepo.getAll();
+        // Clear the entire offline cache directory recursively to avoid orphaned files
+        final cacheCleared = await offlineStorageService.clearCache();
 
-        // Delete files from storage
-        for (final asset in assets) {
-          if (asset.thumbnailPath != null) {
-            final file = File(asset.thumbnailPath!);
-            if (await file.exists()) {
-              await file.delete();
-            }
-          }
-          if (asset.fullImagePath != null) {
-            final file = File(asset.fullImagePath!);
-            if (await file.exists()) {
-              await file.delete();
-            }
-          }
-          if (asset.videoPath != null) {
-            final file = File(asset.videoPath!);
-            if (await file.exists()) {
-              await file.delete();
-            }
-          }
+        if (!cacheCleared) {
+          throw Exception('Failed to delete cache directory - check logs for details');
         }
 
-        // Delete all database records
+        // Delete all database records after disk cleanup
         await offlineAssetRepo.deleteAll();
+
+        // Disable auto-download to prevent immediate re-download
+        await ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.autoDownloadRemoteAssets, false);
+
+        // Invalidate the bulk download provider to update the toggle state
+        ref.invalidate(bulkOfflineDownloadProvider);
 
         // Invalidate the consolidated provider to refresh both cache and sync stats
         ref.invalidate(syncStatusAndCacheStatsProvider);
@@ -616,6 +653,9 @@ class _OfflineCacheSection extends ConsumerWidget {
               ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
             },
           ),
+          // Download limit controls
+          if (bulkDownloadState.isEnabled)
+            _buildDownloadLimitControls(context, ref, remoteAssetCount: stats.remoteAssetCount),
           const _BackgroundSyncControls(),
           // Show download progress when downloading
           if (bulkDownloadState.isDownloading) ...[
@@ -702,6 +742,8 @@ class _OfflineCacheSection extends ConsumerWidget {
               ref.read(bulkOfflineDownloadProvider.notifier).toggleAutoDownload(value);
             },
           ),
+          // Download limit controls (use default remote count of 1000 when loading)
+          if (bulkDownloadState.isEnabled) _buildDownloadLimitControls(context, ref, remoteAssetCount: 1000),
           const _BackgroundSyncControls(),
           // Show download progress when downloading
           if (bulkDownloadState.isDownloading) ...[

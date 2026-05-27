@@ -96,8 +96,6 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   bool _isCheckingForNewAssets = false;
 
   // Check for new assets every 5 seconds when app is open (foreground)
-  // TODO remove: Currently unused - foreground timer is disabled for background sync testing (see _startMonitoring)
-  // ignore: unused_field
   static const Duration _monitoringInterval = Duration(seconds: 5); //TODO: change to 3 min maybe?
 
   BulkOfflineDownloadNotifier({
@@ -161,25 +159,23 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   }
 
   /// Start monitoring for new remote assets
+  ///
+  /// This runs in the foreground when the app is open and provides real-time
+  /// progress updates to the UI. Background downloads are disabled when this
+  /// is active to prevent conflicts with progress tracking.
   void _startMonitoring() {
     if (_monitoringTimer != null) {
       _log.info('Monitoring already active');
       return;
     }
 
-    // TEMPORARILY DISABLED FOR BACKGROUND SYNC TESTING
-    // This allows testing the native iOS background worker integration in isolation
-    _log.info('Foreground monitoring DISABLED for background sync testing');
-    _log.info('Background sync will run via native iOS Background Worker');
+    // TODO: TEMPORARILY DISABLED FOR BACKGROUND SYNC TESTING
+    // if (mounted) {
+    //   state = state.copyWith(isMonitoring: false);
+    // }
 
-    if (mounted) {
-      state = state.copyWith(isMonitoring: false);
-    }
-
-    // COMMENTED OUT FOR TESTING - Uncomment to restore foreground sync
-    /*
     _log.info('Starting foreground monitoring for new remote assets (5 second interval)');
-    _log.info('Background downloads will run via BackgroundWorkerBgService');
+    _log.info('Background downloads are disabled while app is in foreground');
 
     if (mounted) {
       state = state.copyWith(isMonitoring: true);
@@ -192,7 +188,6 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     _monitoringTimer = Timer.periodic(_monitoringInterval, (_) {
       _checkForNewAssets();
     });
-    */
   }
 
   /// Stop monitoring for new remote assets
@@ -211,8 +206,8 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   }
 
   /// Check for new remote assets and download them
-  /// TODO remove: Currently unused - foreground timer is disabled for background sync testing (see _startMonitoring line 187)
-  // ignore: unused_element
+  ///
+  /// This method is called periodically by the foreground monitoring timer
   Future<void> _checkForNewAssets() async {
     // Prevent concurrent checks
     if (_isCheckingForNewAssets) {
@@ -366,7 +361,6 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     }
 
     try {
-      _initializeDownloadState(0);
       _log.info('Starting bulk download of all remote assets');
 
       // Get all remote assets from the database
@@ -374,22 +368,18 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
 
       if (_isCancelled) {
         _log.info('Bulk download cancelled before starting');
-        _finalizeDownloadState();
         return;
       }
 
       if (remoteAssets.isEmpty) {
         _log.info('No remote assets to download');
-        _finalizeDownloadState();
         return;
       }
 
-      // Update total count now that we know how many assets to download
-      if (mounted) {
-        state = state.copyWith(totalAssets: remoteAssets.length);
-      }
-
       _log.info('Found ${remoteAssets.length} remote assets to download');
+
+      // Initialize download state with the correct total count
+      _initializeDownloadState(remoteAssets.length);
 
       await _downloadAssetList(remoteAssets);
 
@@ -414,10 +404,24 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       final allRemoteAssets = await _getAllRemoteAssets();
 
       // Filter out already cached assets
-      final assetsToDownload = allRemoteAssets
+      var assetsToDownload = allRemoteAssets
           .where((asset) => !cachedAssetIds.contains(asset.id))
           .where((asset) => !asset.isTrashed)
           .toList();
+
+      // Apply download limit if enabled
+      final limitEnabled = _appSettingsService.getSetting<bool>(AppSettingsEnum.limitDownloadedAssets);
+      if (limitEnabled) {
+        final maxAssets = _appSettingsService.getSetting<int>(AppSettingsEnum.maxDownloadedAssets);
+        // Assets are already sorted by createdAt DESC (most recent first)
+        // Limit to the specified number of assets
+        if (assetsToDownload.length > maxAssets) {
+          assetsToDownload = assetsToDownload.take(maxAssets).toList();
+          _log.info(
+            'Download limit enabled: limiting to $maxAssets assets (from ${assetsToDownload.length} available)',
+          );
+        }
+      }
 
       return assetsToDownload;
     } catch (error) {

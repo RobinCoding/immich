@@ -277,20 +277,6 @@ class OfflineStorageService {
     }
   }
 
-  /// Get available storage space in bytes
-  Future<int?> getAvailableSpace() async {
-    try {
-      // Note: Dart's FileStat doesn't provide available space directly
-      // This would need platform-specific implementation
-      // For now, we return null to indicate this feature needs platform channels
-      _log.warning('getAvailableSpace not fully implemented - needs platform channels');
-      return null;
-    } catch (error, stack) {
-      _log.severe('Failed to get available space', error, stack);
-      return null;
-    }
-  }
-
   /// Clear all cached files
   Future<bool> clearCache() async {
     try {

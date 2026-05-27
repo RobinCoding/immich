@@ -29,7 +29,9 @@ enum StoreKey<T> {
   readonlyModeEnabled<bool>._(138),
   albumGridView<bool>._(140),
   autoDownloadRemoteAssets<bool>._(142),
-  wifiOnlyBackgroundSync<bool>._(143),
+  allowMobileDataBackgroundSync<bool>._(143),
+  limitDownloadedAssets<bool>._(144),
+  maxDownloadedAssets<int>._(145),
 
   // Experimental stuff
   enableBackup<bool>._(1003),
