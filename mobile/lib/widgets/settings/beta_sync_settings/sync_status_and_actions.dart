@@ -466,7 +466,7 @@ class _BackgroundSyncControls extends ConsumerWidget {
                 style: const TextStyle(fontWeight: FontWeight.w500),
               ),
               subtitle: Text("wifi_only_background_sync_description".t(context: context)),
-              secondary: const Icon(Icons.wifi),
+              secondary: const Icon(Icons.signal_cellular_alt),
               value: allowMobileData,
               onChanged: (value) {
                 ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.allowMobileDataBackgroundSync, value);
@@ -513,7 +513,7 @@ class _OfflineCacheSection extends ConsumerWidget {
                     style: const TextStyle(fontWeight: FontWeight.w500),
                   ),
                   subtitle: Text("offline_download_limit_description".t(context: context)),
-                  secondary: const Icon(Icons.filter_list),
+                  secondary: const Icon(Icons.sd_storage_outlined),
                   value: limitEnabled,
                   onChanged: (value) {
                     ref.read(appSettingsServiceProvider).setSetting(AppSettingsEnum.limitDownloadedAssets, value);
