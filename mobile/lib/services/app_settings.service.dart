@@ -19,7 +19,7 @@ enum AppSettingsEnum<T> {
   backupRequireCharging<bool>(StoreKey.backupRequireCharging, null, false),
   backupTriggerDelay<int>(StoreKey.backupTriggerDelay, null, 30),
   limitDownloadedAssets<bool>(StoreKey.limitDownloadedAssets, null, false),
-  maxDownloadedAssets<int>(StoreKey.maxDownloadedAssets, null, 1000);
+  maxDownloadedAssets<int>(StoreKey.maxDownloadedAssets, null, 100);
 
   const AppSettingsEnum(this.storeKey, this.hiveKey, this.defaultValue);
 

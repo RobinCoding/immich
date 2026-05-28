@@ -11,6 +11,7 @@ import 'package:immich_mobile/extensions/translate_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/infrastructure/repositories/offline_asset.repository.dart';
 import 'package:immich_mobile/providers/app_settings.provider.dart';
+import 'package:immich_mobile/providers/asset_viewer/offline_download_state.provider.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/bulk_offline_download.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
@@ -595,6 +596,9 @@ class _OfflineCacheSection extends ConsumerWidget {
 
         // Invalidate the bulk download provider to update the toggle state
         ref.invalidate(bulkOfflineDownloadProvider);
+
+        // Invalidate all offline download state providers to update cloud icons
+        ref.invalidate(offlineDownloadStateProvider);
 
         // Invalidate the consolidated provider to refresh both cache and sync stats
         ref.invalidate(syncStatusAndCacheStatsProvider);
