@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
@@ -280,6 +281,13 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       return;
     }
 
+    // Check network connectivity before proceeding
+    final canDownload = await _checkNetworkConnectivity();
+    if (!canDownload) {
+      _log.fine('Network check failed, skipping download');
+      return;
+    }
+
     _isCheckingForNewAssets = true;
 
     try {
@@ -342,6 +350,13 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       // Optionally check if auto-download is still enabled (for background monitoring)
       if (checkEnabled && !state.isEnabled) {
         _log.info('Auto-download disabled, stopping');
+        return false;
+      }
+
+      // Check network connectivity before each download
+      final canDownload = await _checkNetworkConnectivity();
+      if (!canDownload) {
+        _log.info('Network check failed, stopping downloads');
         return false;
       }
 
@@ -591,6 +606,45 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     } catch (error) {
       _log.severe('Error getting all remote assets: $error');
       return [];
+    }
+  }
+
+  /// Check network connectivity wifi and mobile data settings
+  /// Returns true if downloads should proceed
+  Future<bool> _checkNetworkConnectivity() async {
+    try {
+      // Check if mobile data downloads are allowed
+      final allowMobileData = Store.get(
+        AppSettingsEnum.allowMobileDataBackgroundSync.storeKey,
+        AppSettingsEnum.allowMobileDataBackgroundSync.defaultValue,
+      );
+
+      _log.fine('Foreground download: Mobile data downloads ${allowMobileData ? "allowed" : "not allowed"}');
+
+      if (allowMobileData) {
+        _log.fine('Foreground download: Mobile data allowed, proceeding with download');
+        return true;
+      }
+
+      // Check current network connectivity
+      final connectivityResult = await Connectivity().checkConnectivity();
+
+      // Check if connected to WiFi
+      final isOnWifi = connectivityResult.contains(ConnectivityResult.wifi);
+
+      if (!isOnWifi) {
+        _log.info(
+          'Foreground download: Mobile data not allowed and not on WiFi. Current connectivity: $connectivityResult',
+        );
+        return false;
+      }
+
+      _log.fine('Foreground download: Mobile data not allowed but on WiFi, proceeding with download');
+      return true;
+    } catch (error, stack) {
+      _log.warning('Foreground download: Error checking network connectivity: $error\n$stack');
+      // On error, proceed with download to avoid blocking legitimate downloads
+      return true;
     }
   }
 
