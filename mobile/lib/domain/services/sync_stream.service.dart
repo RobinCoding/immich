@@ -185,7 +185,7 @@ class SyncStreamService {
   }
 
   Future<void> _handleSyncData(SyncEntityType type, Iterable<Object> data) async {
-    _logger.info("Processing sync data for $type of length ${data.length}");
+    _logger.fine("Processing sync data for $type of length ${data.length}");
     switch (type) {
       case SyncEntityType.authUserV1:
         return _syncStreamRepository.updateAuthUsersV1(data.cast());
