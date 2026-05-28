@@ -2,14 +2,18 @@ import 'dart:async';
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/asset.service.dart';
+import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/infrastructure/repositories/offline_asset.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/remote_asset.repository.dart';
 import 'package:immich_mobile/providers/app_settings.provider.dart';
+import 'package:immich_mobile/providers/asset_viewer/offline_download_state.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/services/app_settings.service.dart';
 import 'package:immich_mobile/services/offline_download.service.dart';
+import 'package:immich_mobile/services/offline_storage.service.dart';
 import 'package:logging/logging.dart';
 
 /// State for tracking bulk download progress
@@ -79,6 +83,8 @@ final bulkOfflineDownloadProvider = StateNotifierProvider<BulkOfflineDownloadNot
     offlineAssetRepo: ref.watch(offlineAssetRepositoryProvider),
     remoteAssetRepo: ref.watch(remoteAssetRepositoryProvider),
     appSettingsService: ref.watch(appSettingsServiceProvider),
+    offlineStorageService: ref.watch(offlineStorageServiceProvider),
+    ref: ref,
   );
 });
 
@@ -88,9 +94,13 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   final OfflineAssetRepository _offlineAssetRepo;
   final RemoteAssetRepository _remoteAssetRepo;
   final AppSettingsService _appSettingsService;
+  final OfflineStorageService _offlineStorageService;
+  final Ref _ref;
   final Logger _log = Logger('BulkOfflineDownloadNotifier');
 
   StreamSubscription<DownloadProgress>? _progressSubscription;
+  StreamSubscription<bool?>? _limitDownloadedAssetsSubscription;
+  StreamSubscription<int?>? _maxDownloadedAssetsSubscription;
   Timer? _monitoringTimer;
   bool _isCancelled = false;
   bool _isCheckingForNewAssets = false;
@@ -104,10 +114,14 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     required OfflineAssetRepository offlineAssetRepo,
     required RemoteAssetRepository remoteAssetRepo,
     required AppSettingsService appSettingsService,
+    required OfflineStorageService offlineStorageService,
+    required Ref ref,
   }) : _downloadService = downloadService,
        _offlineAssetRepo = offlineAssetRepo,
        _remoteAssetRepo = remoteAssetRepo,
        _appSettingsService = appSettingsService,
+       _offlineStorageService = offlineStorageService,
+       _ref = ref,
        super(const BulkDownloadState()) {
     _initialize();
   }
@@ -124,12 +138,51 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       // Listen to download progress
       _progressSubscription = _downloadService.progressStream.listen(_onProgressUpdate);
 
-      // Start foreground monitoring if enabled (5 second interval for quick updates)
+      // Listen to limit settings changes using Store.watch
+      _limitDownloadedAssetsSubscription = Store.watch(StoreKey.limitDownloadedAssets).listen(_onLimitSettingChanged);
+      _maxDownloadedAssetsSubscription = Store.watch(
+        StoreKey.maxDownloadedAssets,
+      ).listen(_onMaxDownloadedAssetsChanged);
+
+      // Perform startup reconciliation if enabled
       if (isEnabled) {
+        await _reconcileOfflineCacheAndQueue();
         _startMonitoring();
       }
     } catch (error) {
       _log.warning('Error initializing bulk download state: $error');
+    }
+  }
+
+  /// Handle changes to the limitDownloadedAssets setting
+  void _onLimitSettingChanged(bool? limitEnabled) async {
+    if (limitEnabled == null || !mounted) {
+      return;
+    }
+
+    _log.info('Limit downloaded assets setting changed to: $limitEnabled');
+
+    try {
+      // Reconcile cache when limit is toggled
+      await _reconcileOfflineCacheAndQueue(restartIfDownloading: true);
+    } catch (error) {
+      _log.warning('Error handling limit setting change: $error');
+    }
+  }
+
+  /// Handle changes to the maxDownloadedAssets setting
+  void _onMaxDownloadedAssetsChanged(int? maxAssets) async {
+    if (maxAssets == null || !mounted) {
+      return;
+    }
+
+    _log.info('Max downloaded assets setting changed to: $maxAssets');
+
+    try {
+      // Reconcile cache when limit value changes
+      await _reconcileOfflineCacheAndQueue(restartIfDownloading: true);
+    } catch (error) {
+      _log.warning('Error handling max assets change: $error');
     }
   }
 
@@ -391,39 +444,139 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
     }
   }
 
-  /// Get list of remote assets that need to be downloaded
-  Future<List<RemoteAsset>> _getRemoteAssetsToDownload() async {
+  /// Compute which remote assets SHOULD be cached based on current settings
+  /// Returns a Set of remote asset IDs that should be in the cache
+  Future<Set<String>> _getDesiredRemoteAssetIds() async {
     try {
-      // Get all cached asset IDs
+      // Get all remote assets sorted by createdAt DESC (newest first)
+      final allRemoteAssets = await _getAllRemoteAssets();
+
+      // Filter out trashed assets
+      final validAssets = allRemoteAssets.where((asset) => !asset.isTrashed).toList();
+
+      // Apply download limit if enabled
+      final limitEnabled = _appSettingsService.getSetting<bool>(AppSettingsEnum.limitDownloadedAssets);
+
+      if (limitEnabled) {
+        final maxAssets = _appSettingsService.getSetting<int>(AppSettingsEnum.maxDownloadedAssets);
+        // Take only the first N assets (newest)
+        final limitedAssets = validAssets.take(maxAssets).toList();
+        _log.fine('Desired set: ${limitedAssets.length} assets (limit: $maxAssets)');
+        return limitedAssets.map((a) => a.id).toSet();
+      } else {
+        // No limit: all valid assets should be cached
+        _log.fine('Desired set: ${validAssets.length} assets (no limit)');
+        return validAssets.map((a) => a.id).toSet();
+      }
+    } catch (error) {
+      _log.severe('Error computing desired remote asset IDs: $error');
+      return {};
+    }
+  }
+
+  /// Delete cached assets that are not in the desired set
+  /// Returns the number of assets cleaned up
+  Future<int> _cleanupCachedAssetsOutsideDesiredSet(Set<String> desiredIds) async {
+    try {
+      // Get all currently cached assets
+      final cachedAssets = await _offlineAssetRepo.getAll();
+
+      // Identify assets not in desired set
+      final assetsToCleanup = cachedAssets.where((asset) => !desiredIds.contains(asset.remoteAssetId)).toList();
+
+      if (assetsToCleanup.isEmpty) {
+        _log.fine('No cached assets to cleanup');
+        return 0;
+      }
+
+      _log.info('Cleaning up ${assetsToCleanup.length} cached assets outside desired set');
+
+      // Delete each asset from both disk and database
+      int cleanedCount = 0;
+      for (final asset in assetsToCleanup) {
+        try {
+          // Get the remote asset to determine file extension
+          final remoteAsset = await _remoteAssetRepo.get(asset.remoteAssetId);
+          if (remoteAsset != null) {
+            // Extract file extension from filename
+            final extension = _getFileExtension(remoteAsset.name);
+
+            // Delete files from disk
+            await _offlineStorageService.deleteAllForAsset(asset.remoteAssetId, extension);
+          }
+
+          // Delete from database
+          await _offlineAssetRepo.delete(asset.remoteAssetId);
+
+          cleanedCount++;
+          _log.fine('Cleaned up asset: ${asset.remoteAssetId}');
+        } catch (error) {
+          _log.warning('Error cleaning up asset ${asset.remoteAssetId}: $error');
+          // Continue with next asset even if one fails
+        }
+      }
+
+      _log.info('Cleanup completed: $cleanedCount assets removed');
+
+      // Invalidate all offline download state providers to update cloud icons
+      if (cleanedCount > 0) {
+        _ref.invalidate(offlineDownloadStateProvider);
+      }
+
+      return cleanedCount;
+    } catch (error) {
+      _log.severe('Error during cleanup: $error');
+      return 0;
+    }
+  }
+
+  /// Main reconciliation method: ensures cache matches current settings
+  /// Returns list of assets that need to be downloaded
+  Future<List<RemoteAsset>> _reconcileOfflineCacheAndQueue({bool restartIfDownloading = false}) async {
+    try {
+      _log.info('Starting cache reconciliation (restartIfDownloading: $restartIfDownloading)');
+
+      // Step 1: Compute desired set of asset IDs
+      final desiredIds = await _getDesiredRemoteAssetIds();
+      _log.fine('Desired set contains ${desiredIds.length} assets');
+
+      // Step 2: Cleanup assets outside desired set
+      final cleanedCount = await _cleanupCachedAssetsOutsideDesiredSet(desiredIds);
+      if (cleanedCount > 0) {
+        _log.info('Cleaned up $cleanedCount excess cached assets');
+      }
+
+      // Step 3: If currently downloading and restart requested, cancel and restart
+      if (restartIfDownloading && state.isDownloading) {
+        _log.info('Download in progress - cancelling to restart with new settings');
+        await cancelBulkDownload();
+      }
+
+      // Step 4: Determine which assets need to be downloaded
       final cachedAssets = await _offlineAssetRepo.getAll();
       final cachedAssetIds = cachedAssets.map((a) => a.remoteAssetId).toSet();
 
-      // Get all remote assets (this would need to be implemented in the asset service)
-      // For now, we'll use a placeholder that returns an empty list
-      // In a real implementation, you'd need to add a method to get all remote assets
+      // Get all remote assets and filter to desired set
       final allRemoteAssets = await _getAllRemoteAssets();
-
-      // Filter out already cached assets
-      var assetsToDownload = allRemoteAssets
+      final assetsToDownload = allRemoteAssets
+          .where((asset) => desiredIds.contains(asset.id))
           .where((asset) => !cachedAssetIds.contains(asset.id))
           .where((asset) => !asset.isTrashed)
           .toList();
 
-      // Apply download limit if enabled
-      final limitEnabled = _appSettingsService.getSetting<bool>(AppSettingsEnum.limitDownloadedAssets);
-      if (limitEnabled) {
-        final maxAssets = _appSettingsService.getSetting<int>(AppSettingsEnum.maxDownloadedAssets);
-        // Assets are already sorted by createdAt DESC (most recent first)
-        // Limit to the specified number of assets
-        if (assetsToDownload.length > maxAssets) {
-          assetsToDownload = assetsToDownload.take(maxAssets).toList();
-          _log.info(
-            'Download limit enabled: limiting to $maxAssets assets (from ${assetsToDownload.length} available)',
-          );
-        }
-      }
-
+      _log.info('Reconciliation complete: ${assetsToDownload.length} assets need downloading');
       return assetsToDownload;
+    } catch (error) {
+      _log.severe('Error during reconciliation: $error');
+      return [];
+    }
+  }
+
+  /// Get list of remote assets that need to be downloaded
+  /// Uses the desired-set approach for consistency
+  Future<List<RemoteAsset>> _getRemoteAssetsToDownload() async {
+    try {
+      return await _reconcileOfflineCacheAndQueue();
     } catch (error) {
       _log.severe('Error getting remote assets to download: $error');
       return [];
@@ -439,6 +592,15 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
       _log.severe('Error getting all remote assets: $error');
       return [];
     }
+  }
+
+  /// Extract file extension from filename
+  String _getFileExtension(String filename) {
+    final lastDot = filename.lastIndexOf('.');
+    if (lastDot == -1 || lastDot == filename.length - 1) {
+      return 'jpg'; // Default extension
+    }
+    return filename.substring(lastDot + 1);
   }
 
   /// Cancel ongoing bulk download
@@ -465,6 +627,8 @@ class BulkOfflineDownloadNotifier extends StateNotifier<BulkDownloadState> {
   void dispose() {
     _stopMonitoring();
     _progressSubscription?.cancel();
+    _limitDownloadedAssetsSubscription?.cancel();
+    _maxDownloadedAssetsSubscription?.cancel();
     super.dispose();
   }
 }
